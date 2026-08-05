@@ -16,6 +16,10 @@ router.get('/', controller.list);
 // GET /api/products/manufacturers — list of distinct manufacturer brands
 router.get('/manufacturers', controller.getManufacturers);
 
+// GET /api/products/pricing/all?type=customer_specific — all active pricing records (admin)
+// MUST be before /:id to avoid being swallowed by the wildcard
+router.get('/pricing/all', requireRoles('admin'), controller.listAllPricing);
+
 // GET /api/products/:id
 router.get('/:id', controller.getById);
 
@@ -35,12 +39,10 @@ router.post(
 );
 
 // PATCH /api/products/:id
-router.patch(
-  '/:id',
-  ADMIN_SALES,
-  auditLogger('product'),
-  controller.update
-);
+router.patch('/:id', ADMIN_SALES, auditLogger('product'), controller.update);
+
+// DELETE /api/products/:id/pricing/:pricingId — deactivate a pricing record (before /:id DELETE)
+router.delete('/:id/pricing/:pricingId', requireRoles('admin'), controller.deactivatePricing);
 
 // DELETE /api/products/:id
 router.delete('/:id', requireRoles('admin'), auditLogger('product'), controller.remove);

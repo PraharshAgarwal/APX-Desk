@@ -19,11 +19,16 @@ const DD: React.CSSProperties = {
 };
 
 export default function WarehousePage() {
+  const { hasRole } = useAuthStore();
+  const isAdmin = hasRole('admin');
+  const isWarehouse = hasRole('warehouse_manager');
+
   const [tab, setTab] = useState<Tab>('grn');
   const [showGRNModal, setShowGRNModal] = useState(false);
   const [showDispatchModal, setShowDispatchModal] = useState<string | null>(null);
   const [expandedGRN, setExpandedGRN] = useState<string | null>(null);
   const [expandedDispatch, setExpandedDispatch] = useState<string | null>(null);
+  const [approveGRNId, setApproveGRNId] = useState<string | null>(null);
 
   // GRN filters
   const [grnWarehouse, setGrnWarehouse] = useState('');
@@ -46,6 +51,10 @@ export default function WarehousePage() {
       return (await api.get(`/warehouse/grn?${p}`)).data;
     },
   });
+  const { data: pendingGRNsData, refetch: refetchPending } = useQuery({
+    queryKey: ['grns-pending'],
+    queryFn: async () => (await api.get('/warehouse/grn/pending')).data,
+  });
   const { data: dispatches } = useQuery({
     queryKey: ['dispatches', dispStatus],
     queryFn: async () => {
@@ -62,12 +71,27 @@ export default function WarehousePage() {
 
   const warehouseList: any[] = warehouses?.data || [];
   const grnList: any[] = grns?.data || [];
+  const pendingGRNs: any[] = pendingGRNsData?.data || [];
   const dispatchList: any[] = dispatches?.data || [];
+  const pendingDispatches: any[] = dispatchList.filter((d: any) => d.status === 'pending_dispatch');
 
   const qc = useQueryClient();
   const deliverMutation = useMutation({
     mutationFn: async (id: string) => api.patch(`/warehouse/dispatches/${id}/deliver`),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['dispatches'] }),
+  });
+  const executeMutation = useMutation({
+    mutationFn: async (id: string) => api.patch(`/warehouse/dispatches/${id}/execute`),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['dispatches'] }),
+  });
+  const approveMutation = useMutation({
+    mutationFn: async ({ id, approved, notes }: { id: string; approved: boolean; notes: string }) =>
+      api.patch(`/warehouse/grn/${id}/approve`, { approved, notes }),
+    onSuccess: () => {
+      setApproveGRNId(null);
+      refetchPending();
+      refetchGRN();
+    },
   });
 
   return (
@@ -106,6 +130,53 @@ export default function WarehousePage() {
       {/* GRN Tab */}
       {tab === 'grn' && (
         <div>
+          {/* ── Pending Approval Banner (admin only) ── */}
+          {pendingGRNs.length > 0 && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fcd34d', borderRadius: 12, padding: '14px 18px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <Icons.AlertTriangle size={16} color="#d97706" />
+                <span style={{ fontWeight: 700, fontSize: 14, color: '#92400e' }}>{pendingGRNs.length} GRN{pendingGRNs.length !== 1 ? 's' : ''} Awaiting Admin Approval</span>
+              </div>
+              {pendingGRNs.map((g: any) => (
+                <div key={g.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: '#fff', border: '1px solid #fde68a', borderRadius: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#1a1d23' }}>{g.grn_number}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                      From: <strong style={{ color: '#374151' }}>{g.received_from || g.supplier_name || '—'}</strong>
+                      {g.vehicle_number && <> &nbsp;·&nbsp; Vehicle: <strong style={{ color: '#374151' }}>{g.vehicle_number}</strong></>}
+                      &nbsp;·&nbsp; Warehouse: {g.warehouse_name}
+                      &nbsp;·&nbsp; By: {g.received_by_name}
+                      &nbsp;·&nbsp; {g.item_count} line{g.item_count !== 1 ? 's' : ''}, {Number(g.total_qty || 0).toFixed(0)} units
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+                    <button type="button"
+                      onClick={() => approveMutation.mutate({ id: g.id, approved: true, notes: '' })}
+                      disabled={approveMutation.isPending}
+                      style={{ fontSize: 12, fontWeight: 600, color: '#059669', background: '#ecfdf5', border: '1px solid #d1fae5', padding: '5px 14px', borderRadius: 7, cursor: 'pointer' }}>
+                      Approve
+                    </button>
+                    <button type="button"
+                      onClick={() => setApproveGRNId(g.id)}
+                      style={{ fontSize: 12, fontWeight: 600, color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', padding: '5px 14px', borderRadius: 7, cursor: 'pointer' }}>
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Reject modal */}
+          {approveGRNId && (
+            <RejectGRNModal
+              grn={pendingGRNs.find((g: any) => g.id === approveGRNId)}
+              onClose={() => setApproveGRNId(null)}
+              onReject={(notes) => approveMutation.mutate({ id: approveGRNId, approved: false, notes })}
+              isPending={approveMutation.isPending}
+            />
+          )}
+
           {/* GRN Filter Bar */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '12px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>Filter:</span>
@@ -122,8 +193,8 @@ export default function WarehousePage() {
               <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>Status</label>
               <select value={grnStatus} onChange={e => setGrnStatus(e.target.value)} style={DD}>
                 <option value="">Any status</option>
+                <option value="pending_approval">Pending Approval</option>
                 <option value="completed">Completed</option>
-                <option value="draft">Draft</option>
                 <option value="cancelled">Cancelled</option>
               </select>
             </div>
@@ -153,11 +224,11 @@ export default function WarehousePage() {
             <table className="data-table">
               <thead><tr>
                 <th style={{ width: 32 }}></th>
-                <th>GRN #</th><th>Warehouse</th><th>Supplier</th><th>Received By</th><th>Status</th><th>Date</th>
+                <th>GRN #</th><th>Warehouse</th><th>Received From</th><th>Vehicle No.</th><th>Received By</th><th>Status</th><th>Date</th>
               </tr></thead>
               <tbody>
                 {grnList.length === 0 ? (
-                  <tr><td colSpan={7} style={{ textAlign: 'center', padding: 48, color: '#9ca3af' }}>
+                  <tr><td colSpan={8} style={{ textAlign: 'center', padding: 48, color: '#9ca3af' }}>
                     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
                       <Icons.Clipboard size={32} color="#d1d5db" />
                       <span>No GRNs match your filters</span>
@@ -180,6 +251,37 @@ export default function WarehousePage() {
       {/* Dispatches Tab */}
       {tab === 'dispatches' && (
         <div>
+          {/* ── Pending Dispatch Banner (warehouse manager only) ── */}
+          {isWarehouse && pendingDispatches.length > 0 && (
+            <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 12, padding: '14px 18px', marginBottom: 16 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+                <Icons.Truck size={16} color="#2563eb" />
+                <span style={{ fontWeight: 700, fontSize: 14, color: '#1e3a8a' }}>
+                  {pendingDispatches.length} Dispatch{pendingDispatches.length !== 1 ? 'es' : ''} Assigned — Ready to Execute
+                </span>
+              </div>
+              {pendingDispatches.map((d: any) => (
+                <div key={d.id} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '10px 12px', background: '#fff', border: '1px solid #bfdbfe', borderRadius: 8, marginBottom: 8 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontWeight: 700, fontSize: 13, color: '#1a1d23' }}>{d.dispatch_number}</div>
+                    <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>
+                      Order: <strong style={{ color: '#374151' }}>{d.order_number}</strong>
+                      &nbsp;·&nbsp; {d.business_name || '—'}
+                      &nbsp;·&nbsp; Vehicle: <strong style={{ color: '#374151' }}>{d.vehicle_number}</strong>
+                      &nbsp;·&nbsp; Driver: {d.driver_name} ({d.driver_phone})
+                    </div>
+                  </div>
+                  <button type="button"
+                    onClick={() => executeMutation.mutate(d.id)}
+                    disabled={executeMutation.isPending}
+                    style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: '#2563eb', border: 'none', padding: '6px 16px', borderRadius: 7, cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                    {executeMutation.isPending ? 'Executing…' : 'Execute Dispatch'}
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
           {/* Dispatch Filter Bar */}
           <div style={{ background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12, padding: '12px 18px', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, fontWeight: 700, color: '#374151' }}>Filter:</span>
@@ -187,6 +289,7 @@ export default function WarehousePage() {
               <label style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>Status</label>
               <select value={dispStatus} onChange={e => setDispStatus(e.target.value)} style={DD}>
                 <option value="">Any status</option>
+                <option value="pending_dispatch">Pending Execution</option>
                 <option value="in_transit">In Transit</option>
                 <option value="delivered">Delivered</option>
               </select>
@@ -201,7 +304,9 @@ export default function WarehousePage() {
           <div className="card">
             <div className="card-header">
               <span className="card-title">Dispatches</span>
-              <button type="button" className="btn-primary" id="dispatch-order-btn" onClick={() => setShowDispatchModal('pick')}>+ Dispatch Order</button>
+              {isAdmin && (
+                <button type="button" className="btn-primary" id="dispatch-order-btn" onClick={() => setShowDispatchModal('pick')}>+ Create Dispatch</button>
+              )}
             </div>
             <table className="data-table">
               <thead><tr>
@@ -280,16 +385,17 @@ function GRNAccordionRow({ grn, expanded, onToggle }: { grn: any; expanded: bool
         </td>
         <td><strong style={{ color: '#059669' }}>{grn.grn_number}</strong></td>
         <td>{grn.warehouse_name || '—'}</td>
-        <td style={{ color: '#6b7280' }}>{grn.supplier_name || '—'}</td>
+        <td style={{ color: '#1a1d23', fontWeight: 500 }}>{grn.received_from || grn.supplier_name || '—'}</td>
+        <td style={{ fontFamily: 'monospace', fontSize: 12, color: '#6b7280' }}>{grn.vehicle_number || '—'}</td>
         <td style={{ fontSize: 12, color: '#6b7280' }}>{grn.received_by_name || '—'}</td>
-        <td><span className={`badge ${grn.status === 'completed' ? 'badge-green' : grn.status === 'draft' ? 'badge-amber' : 'badge-red'}`}>{grn.status}</span></td>
+        <td><span className={`badge ${grn.status === 'completed' ? 'badge-green' : grn.status === 'pending_approval' ? 'badge-amber' : 'badge-red'}`}>{grn.status?.replace('_', ' ')}</span></td>
         <td style={{ fontSize: 12, color: '#6b7280' }}>{new Date(grn.received_at || grn.created_at).toLocaleDateString('en-IN')}</td>
       </tr>
 
       {/* Expandable detail row */}
       {expanded && (
         <tr>
-          <td colSpan={7} style={{ padding: 0, borderTop: 'none' }}>
+          <td colSpan={8} style={{ padding: 0, borderTop: 'none' }}>
             <div style={{
               background: '#f8fffe', borderTop: '2px solid #d1fae5',
               borderBottom: '2px solid #d1fae5', padding: '14px 20px 16px 52px',
@@ -409,8 +515,8 @@ function DispatchAccordionRow({ dispatch: d, expanded, onToggle, onDeliver }: { 
         <td style={{ color: '#6b7280', fontFamily: 'monospace', fontSize: 12 }}>{d.vehicle_number || '—'}</td>
         <td style={{ color: '#6b7280' }}>{d.driver_name || '—'}</td>
         <td>
-          <span className={`badge ${d.status === 'delivered' ? 'badge-green' : d.status === 'in_transit' ? 'badge-blue' : 'badge-amber'}`}>
-            {d.status?.replace('_', ' ')}
+          <span className={`badge ${d.status === 'delivered' ? 'badge-green' : d.status === 'in_transit' ? 'badge-amber' : 'badge-blue'}`}>
+            {d.status?.replace(/_/g, ' ')}
           </span>
         </td>
         <td style={{ fontSize: 12, color: '#6b7280' }}>{new Date(d.created_at).toLocaleDateString('en-IN')}</td>
@@ -511,18 +617,47 @@ function DispatchAccordionRow({ dispatch: d, expanded, onToggle, onDeliver }: { 
   );
 }
 
+/* ── Reject GRN Modal (admin) ───────────────────── */
+function RejectGRNModal({ grn, onClose, onReject, isPending }: { grn: any; onClose: () => void; onReject: (notes: string) => void; isPending: boolean }) {
+  const [notes, setNotes] = useState('');
+  return (
+    <Modal title="Reject GRN" onClose={onClose} size="sm"
+      footer={
+        <>
+          <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
+          <button type="button" style={{ background: '#dc2626', color: '#fff', border: 'none', borderRadius: 8, padding: '8px 18px', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+            onClick={() => onReject(notes)} disabled={isPending}>
+            {isPending ? 'Rejecting…' : 'Confirm Rejection'}
+          </button>
+        </>
+      }>
+      <div style={{ marginBottom: 14, padding: '10px 14px', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: 8, fontSize: 13 }}>
+        Rejecting <strong>{grn?.grn_number}</strong> from <strong>{grn?.received_from || grn?.supplier_name || '—'}</strong>.
+        Inventory will NOT be updated.
+      </div>
+      <div className="field-group">
+        <label className="field-label">Reason for Rejection <span style={{ color: '#9ca3af', fontWeight: 400 }}>(optional)</span></label>
+        <textarea className="form-input" rows={3} value={notes} onChange={e => setNotes(e.target.value)}
+          placeholder="e.g. Wrong products, quantity mismatch…" style={{ resize: 'vertical' }} />
+      </div>
+    </Modal>
+  );
+}
+
 /* ── GRN Creation Modal ─────────────────────────── */
 function GRNModal({ warehouses, onClose }: { warehouses: any[]; onClose: () => void }) {
   const qc = useQueryClient();
   const [warehouseId, setWarehouseId] = useState(warehouses[0]?.id || '');
+  const [receivedFrom, setReceivedFrom] = useState('');
+  const [vehicleNumber, setVehicleNumber] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [invoiceNumber, setInvoiceNumber] = useState('');
+  const [attempted, setAttempted] = useState(false);
   const [items, setItems] = useState([{ productId: '', manufacturer: '', batchNumber: '', receivedQty: 1, expiryDate: '', manufactureDate: '' }]);
 
   const { data: productsData } = useQuery({ queryKey: ['products-list'], queryFn: async () => (await api.get('/products')).data.data });
   const products: any[] = productsData || [];
 
-  // Group products by manufacturer for optgroup
   const productsByMfr = products.reduce((acc: Record<string, any[]>, p: any) => {
     const mfr = p.manufacturer || 'Generic';
     if (!acc[mfr]) acc[mfr] = [];
@@ -540,28 +675,39 @@ function GRNModal({ warehouses, onClose }: { warehouses: any[]; onClose: () => v
 
   const mutation = useMutation({
     mutationFn: async () => (await api.post('/warehouse/grn', {
-      warehouseId, supplierName, invoiceNumber,
+      warehouseId, receivedFrom, vehicleNumber, supplierName, invoiceNumber,
       items: items.map(i => ({ productId: i.productId, batchNumber: i.batchNumber, receivedQty: Number(i.receivedQty), expiryDate: i.expiryDate || undefined, manufactureDate: i.manufactureDate || undefined })),
     })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['grns'] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['grns'] }); qc.invalidateQueries({ queryKey: ['grns-pending'] }); onClose(); },
   });
 
   const addRow = () => setItems([...items, { productId: '', manufacturer: '', batchNumber: '', receivedQty: 1, expiryDate: '', manufactureDate: '' }]);
   const removeRow = (i: number) => setItems(items.filter((_, idx) => idx !== i));
   const updateRow = (i: number, field: string, value: string | number) => setItems(items.map((r, idx) => idx === i ? { ...r, [field]: value } : r));
 
+  const rfOk = receivedFrom.trim().length > 0;
+  const vnOk = vehicleNumber.trim().length > 0;
+  const canSubmit = rfOk && vnOk && !!warehouseId && items.every(i => i.productId && i.batchNumber);
+
   return (
-    <Modal title="Create Goods Receipt Note" onClose={onClose} size="lg"
+    <Modal title="Create Goods Receipt Note" onClose={onClose} size="xl"
       footer={
         <>
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
-          <button type="button" className="btn-primary" onClick={() => mutation.mutate()}
-            disabled={!warehouseId || items.some(i => !i.productId || !i.batchNumber) || mutation.isPending}>
-            {mutation.isPending ? 'Saving…' : 'Create GRN'}
+          <button type="button" className="btn-primary" onClick={() => { setAttempted(true); if (canSubmit) mutation.mutate(); }}
+            disabled={mutation.isPending}>
+            {mutation.isPending ? 'Saving…' : 'Submit GRN for Approval'}
           </button>
         </>
       }>
-      <div className="grid-3" style={{ marginBottom: 20 }}>
+
+      {/* Info banner */}
+      <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: '10px 14px', marginBottom: 16, fontSize: 12, color: '#92400e', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Icons.AlertTriangle size={13} color="#d97706" />
+        This GRN will be submitted for <strong>admin approval</strong> before inventory is updated.
+      </div>
+
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 10 }}>
         <div className="field-group">
           <label className="field-label">Warehouse</label>
           <select className="form-input" value={warehouseId} onChange={e => setWarehouseId(e.target.value)}>
@@ -569,8 +715,18 @@ function GRNModal({ warehouses, onClose }: { warehouses: any[]; onClose: () => v
           </select>
         </div>
         <div className="field-group">
-          <label className="field-label">Supplier Name</label>
-          <input className="form-input" value={supplierName} onChange={e => setSupplierName(e.target.value)} placeholder="Supplier name…" />
+          <label className="field-label">Received From (Place / Supplier) <span style={{ color: '#dc2626' }}>*</span></label>
+          <input className="form-input" value={receivedFrom} onChange={e => setReceivedFrom(e.target.value)}
+            placeholder="e.g. IFFCO Depot, Belgaum"
+            style={attempted && !rfOk ? { borderColor: '#ef4444' } : {}} />
+          {attempted && !rfOk && <div className="field-error">Required</div>}
+        </div>
+        <div className="field-group">
+          <label className="field-label">Vehicle Number <span style={{ color: '#dc2626' }}>*</span></label>
+          <input className="form-input" value={vehicleNumber} onChange={e => setVehicleNumber(e.target.value)}
+            placeholder="e.g. KA 01 AB 1234"
+            style={attempted && !vnOk ? { borderColor: '#ef4444' } : {}} />
+          {attempted && !vnOk && <div className="field-error">Required</div>}
         </div>
         <div className="field-group">
           <label className="field-label">Invoice Number</label>
@@ -578,17 +734,33 @@ function GRNModal({ warehouses, onClose }: { warehouses: any[]; onClose: () => v
         </div>
       </div>
 
-      <div>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-          <label className="field-label" style={{ margin: 0 }}>Items Received</label>
-          <button type="button" className="btn-secondary" onClick={addRow} style={{ fontSize: 12, padding: '4px 12px' }}>+ Add Row</button>
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 14, marginTop: 4 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <label className="field-label" style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#374151' }}>
+            Items Received
+          </label>
+          <button type="button" className="btn-secondary" onClick={addRow} style={{ fontSize: 12, padding: '4px 14px' }}>
+            + Add Row
+          </button>
         </div>
+
+        {/* Column headers — must match '2.5fr 1.2fr 1.2fr 72px 28px' grid exactly */}
+        <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1.2fr 72px 28px', gap: 10, marginBottom: 4, padding: '0 2px' }}>
+          {['Product', 'Manufacturer', 'Batch No.', 'Qty', ''].map(h => (
+            <div key={h} style={{ fontSize: 11, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{h}</div>
+          ))}
+        </div>
+
         {items.map((item, i) => (
-          <div key={i} style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 0.7fr 1fr 1fr 1fr auto', gap: 8, marginBottom: 8, alignItems: 'end' }}>
-            <div>
-              {i === 0 && <label className="field-label">Product</label>}
-              <select className="form-input" value={item.productId} onChange={e => handleProductChange(i, e.target.value)}>
-                <option value="">Select…</option>
+          <div key={i} style={{
+            background: '#f8f9fb', border: '1px solid #e5e7eb', borderRadius: 10,
+            padding: '10px 12px', marginBottom: 8,
+          }}>
+            {/* Row 1: product / manufacturer / batch / qty / delete */}
+            <div style={{ display: 'grid', gridTemplateColumns: '2.5fr 1.2fr 1.2fr 72px 28px', gap: 10, alignItems: 'center' }}>
+              <select className="form-input" value={item.productId} onChange={e => handleProductChange(i, e.target.value)}
+                style={{ fontSize: 13, minWidth: 0 }}>
+                <option value="">Select product…</option>
                 {Object.entries(productsByMfr).sort(([a], [b]) => a.localeCompare(b)).map(([mfr, mfrProds]) => (
                   <optgroup key={mfr} label={mfr}>
                     {(mfrProds as any[]).map((p: any) => (
@@ -597,30 +769,36 @@ function GRNModal({ warehouses, onClose }: { warehouses: any[]; onClose: () => v
                   </optgroup>
                 ))}
               </select>
+
+              <input className="form-input" value={item.manufacturer} readOnly placeholder="Auto-filled"
+                style={{ background: '#fff', color: item.manufacturer ? '#059669' : '#9ca3af', fontWeight: item.manufacturer ? 600 : 400, cursor: 'default', fontSize: 13, minWidth: 0 }} />
+
+              <input className="form-input" value={item.batchNumber}
+                onChange={e => updateRow(i, 'batchNumber', e.target.value)}
+                placeholder="Batch no."
+                style={{ fontSize: 13, fontFamily: 'monospace', minWidth: 0 }} />
+
+              <input className="form-input" type="number" min={1} value={item.receivedQty}
+                onChange={e => updateRow(i, 'receivedQty', e.target.value)}
+                style={{ fontSize: 13, textAlign: 'center', minWidth: 0 }} />
+
+              <button type="button" onClick={() => removeRow(i)} disabled={items.length === 1}
+                className="modal-close" style={{ opacity: items.length === 1 ? 0.3 : 1, flexShrink: 0 }}>
+                <IconX size={10} strokeWidth={1.8} />
+              </button>
             </div>
-            <div>
-              {i === 0 && <label className="field-label">Manufacturer</label>}
-              <input className="form-input" value={item.manufacturer} readOnly
-                placeholder="Auto-filled"
-                style={{ background: '#f8f9fb', color: item.manufacturer ? '#059669' : '#9ca3af', fontWeight: item.manufacturer ? 600 : 400, cursor: 'default' }} />
+
+            {/* Row 2: dates */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 8 }}>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Mfg Date</label>
+                <DatePicker value={item.manufactureDate} onChange={v => updateRow(i, 'manufactureDate', v)} placeholder="Manufacturing date" />
+              </div>
+              <div>
+                <label style={{ fontSize: 11, fontWeight: 600, color: '#9ca3af', textTransform: 'uppercase', letterSpacing: '0.05em', display: 'block', marginBottom: 4 }}>Expiry Date</label>
+                <DatePicker value={item.expiryDate} onChange={v => updateRow(i, 'expiryDate', v)} placeholder="Expiry date" min={item.manufactureDate || undefined} />
+              </div>
             </div>
-            <div>
-              {i === 0 && <label className="field-label">Batch #</label>}
-              <input className="form-input" value={item.batchNumber} onChange={e => updateRow(i, 'batchNumber', e.target.value)} placeholder="BATCH-001" />
-            </div>
-            <div>
-              {i === 0 && <label className="field-label">Qty</label>}
-              <input className="form-input" type="number" min={1} value={item.receivedQty} onChange={e => updateRow(i, 'receivedQty', e.target.value)} />
-            </div>
-            <div>
-              {i === 0 && <label className="field-label">Mfg Date</label>}
-              <DatePicker value={item.manufactureDate} onChange={v => updateRow(i, 'manufactureDate', v)} placeholder="Mfg date" />
-            </div>
-            <div>
-              {i === 0 && <label className="field-label">Expiry</label>}
-              <DatePicker value={item.expiryDate} onChange={v => updateRow(i, 'expiryDate', v)} placeholder="Expiry date" min={item.manufactureDate||undefined} />
-            </div>
-            <button type="button" onClick={() => removeRow(i)} disabled={items.length === 1} className="modal-close" style={{ alignSelf: 'flex-end', marginBottom: i === 0 ? 20 : 0 }}><IconX size={10} strokeWidth={1.8} /></button>
           </div>
         ))}
       </div>
@@ -639,10 +817,15 @@ function DispatchModal({ orders, onClose, onSuccess }: { orders: any[]; onClose:
 
   const vehicleOk = vehicleNumber.trim().length > 0;
   const driverOk  = driverName.trim().length > 0;
-  const canSubmit = !!orderId && vehicleOk && driverOk;
+  const phoneOk   = driverPhone.trim().length > 0;
+  const canSubmit = !!orderId && vehicleOk && driverOk && phoneOk;
 
   const combinedMutation = useMutation({
-    mutationFn: async () => (await api.post(`/warehouse/dispatch/${orderId}`, { vehicleNumber: vehicleNumber.trim(), driverName: driverName.trim(), driverPhone: driverPhone.trim() || undefined })).data,
+    mutationFn: async () => (await api.post(`/warehouse/dispatch/${orderId}`, {
+      vehicleNumber: vehicleNumber.trim(),
+      driverName: driverName.trim(),
+      driverPhone: driverPhone.trim(),
+    })).data,
     onSuccess: () => onSuccess(),
     onError: () => {},
   });
@@ -654,16 +837,21 @@ function DispatchModal({ orders, onClose, onSuccess }: { orders: any[]; onClose:
   };
 
   return (
-    <Modal title="Dispatch Order" onClose={onClose} size="sm"
+    <Modal title="Create Dispatch" onClose={onClose} size="md"
       footer={
         <>
           <button type="button" className="btn-secondary" onClick={onClose}>Cancel</button>
           <button type="button" className="btn-primary" onClick={handleSubmit}
             disabled={combinedMutation.isPending}>
-            {combinedMutation.isPending ? 'Dispatching…' : 'Pick & Dispatch'}
+            {combinedMutation.isPending ? 'Creating…' : 'Create Dispatch'}
           </button>
         </>
       }>
+      {/* Info banner */}
+      <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: 12, color: '#1e3a8a', display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Icons.Truck size={13} color="#2563eb" />
+        Dispatch will be assigned to the warehouse manager for execution.
+      </div>
       <div className="field-group">
         <label className="field-label">Select Order <span style={{ fontSize: 11, color: '#059669', fontWeight: 400 }}>(Confirmed — ready to dispatch)</span></label>
         <select className="form-input" value={orderId} onChange={e => setOrderId(e.target.value)}>
@@ -701,8 +889,11 @@ function DispatchModal({ orders, onClose, onSuccess }: { orders: any[]; onClose:
           {attempted && !driverOk && <div className="field-error">Driver name is required.</div>}
         </div>
         <div className="field-group">
-          <label className="field-label">Driver Phone <span style={{ fontSize: 11, color: '#9ca3af', fontWeight: 400 }}>(optional)</span></label>
-          <input className="form-input" value={driverPhone} onChange={e => setDriverPhone(e.target.value)} placeholder="+91 …" />
+          <label className="field-label">Driver Phone <span style={{ color: '#dc2626' }}>*</span></label>
+          <input className="form-input" value={driverPhone} onChange={e => setDriverPhone(e.target.value)}
+            placeholder="+91 98765 43210"
+            style={attempted && !phoneOk ? { borderColor: '#ef4444' } : {}} />
+          {attempted && !phoneOk && <div className="field-error">Driver phone is required.</div>}
         </div>
       </div>
       {combinedMutation.isError && <div className="field-error">Dispatch failed. Ensure the order has inventory reserved and a warehouse assigned.</div>}

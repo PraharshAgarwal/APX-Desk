@@ -6,6 +6,7 @@ import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import Modal from '@/components/ui/Modal';
 import { Icons } from '@/components/ui/Icons';
+import { useToast } from '@/hooks/useToast';
 
 // Brand color palette — maps manufacturer → accent color
 const BRAND_COLORS: Record<string, { bg: string; border: string; text: string; badge: string }> = {
@@ -268,6 +269,8 @@ function CreateProductModal({ onClose }: { onClose: () => void }) {
   const [form, setForm] = useState({ sku: '', name: '', description: '', manufacturer: '', unit: 'bag', gstRate: 0, lowStockThreshold: 100, hsnCode: '' });
   const [basePrice, setBasePrice] = useState('');
 
+  const toast = useToast();
+
   const mutation = useMutation({
     mutationFn: async () => {
       const p = await api.post('/products', form);
@@ -276,7 +279,15 @@ function CreateProductModal({ onClose }: { onClose: () => void }) {
       }
       return p;
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products'] }); qc.invalidateQueries({ queryKey: ['manufacturers'] }); onClose(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: ['manufacturers'] });
+      toast.success('Product added successfully');
+      onClose();
+    },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to add product');
+    },
   });
 
   const f = (k: string, v: any) => setForm(prev => ({ ...prev, [k]: v }));
@@ -350,13 +361,21 @@ function CreateProductModal({ onClose }: { onClose: () => void }) {
 /* ── Pricing Modal ─────────────────────────────────── */
 function PricingModal({ product, onClose }: { product: any; onClose: () => void }) {
   const qc = useQueryClient();
+  const toast = useToast();
   const c = brandColor(product.manufacturer || 'Generic');
   const { data } = useQuery({ queryKey: ['pricing', product.id], queryFn: async () => (await api.get(`/products/${product.id}/pricing`)).data.data });
   const [form, setForm] = useState({ pricingType: 'standard', pricePerUnit: '', discountPct: 0, minQuantity: 1 });
 
   const mutation = useMutation({
     mutationFn: async () => api.post(`/products/${product.id}/pricing`, form),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['pricing', product.id] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['pricing', product.id] });
+      toast.success('Pricing tier saved');
+      setForm({ pricingType: 'standard', pricePerUnit: '', discountPct: 0, minQuantity: 1 });
+    },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to save pricing');
+    },
   });
 
   const pricingList: any[] = data || [];
@@ -380,11 +399,37 @@ function PricingModal({ product, onClose }: { product: any; onClose: () => void 
             <div style={{ marginBottom: 16 }}>
               <div style={{ fontSize: 12, fontWeight: 700, color: '#4b5563', marginBottom: 8 }}>Current Pricing</div>
               {pricingList.map((pp: any) => (
-                <div key={pp.id} style={{ display: 'flex', justifyContent: 'space-between', background: '#f8f9fb', borderRadius: 8, padding: '8px 12px', marginBottom: 6, alignItems: 'center' }}>
+                <div
+                  key={pp.id}
+                  title="Click to fill form below"
+                  onClick={() => setForm(f => ({
+                    ...f,
+                    pricePerUnit: String(pp.price_per_unit),
+                    pricingType:  pp.pricing_type,
+                    discountPct:  Number(pp.discount_pct ?? 0),
+                    minQuantity:  Number(pp.min_quantity ?? 1),
+                  }))}
+                  style={{
+                    display: 'flex', justifyContent: 'space-between',
+                    background: '#f8f9fb', borderRadius: 8,
+                    padding: '8px 12px', marginBottom: 6, alignItems: 'center',
+                    cursor: 'pointer', border: '1px solid transparent',
+                    transition: 'background 0.12s, border-color 0.12s',
+                  }}
+                  onMouseEnter={e => {
+                    (e.currentTarget as HTMLDivElement).style.background = '#ecfdf5';
+                    (e.currentTarget as HTMLDivElement).style.borderColor = '#6ee7b7';
+                  }}
+                  onMouseLeave={e => {
+                    (e.currentTarget as HTMLDivElement).style.background = '#f8f9fb';
+                    (e.currentTarget as HTMLDivElement).style.borderColor = 'transparent';
+                  }}
+                >
                   <div>
                     <span style={{ fontSize: 12, fontWeight: 600, color: '#1a1d23' }}>{TYPE_LABELS[pp.pricing_type] || pp.pricing_type}</span>
                     {pp.min_quantity > 1 && <span style={{ fontSize: 11, color: '#6b7280', marginLeft: 8 }}>Min {pp.min_quantity} {product.unit}s</span>}
                     {pp.business_name && <span style={{ fontSize: 11, color: '#7c3aed', marginLeft: 8 }}>→ {pp.business_name}</span>}
+                    <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 8, fontStyle: 'italic' }}>↓ fill</span>
                   </div>
                   <div style={{ textAlign: 'right' }}>
                     <div style={{ fontWeight: 700, color: '#059669' }}>₹{Number(pp.price_per_unit).toLocaleString('en-IN')}</div>

@@ -2,14 +2,24 @@
 
 const { success, error } = require('../../utils/response');
 const authService = require('./auth.service');
+const { recordFailure, resetLimit } = require('../../middleware/loginRateLimiter');
 const logger = require('../../utils/logger');
 
 async function login(req, res, next) {
+  const email = (req.body?.email || '').toString().toLowerCase().trim();
   try {
-    const { email, password } = req.body;
+    const { password } = req.body;
     const result = await authService.login(email, password, req.ip);
+
+    // ✅ Successful login — clear the failure counter
+    resetLimit(email).catch(() => {});
+
     return success(res, result, 'Login successful');
   } catch (err) {
+    // ❌ Failed login (wrong password or suspended) — record the attempt
+    if (err.statusCode === 401 || err.statusCode === 403) {
+      recordFailure(email).catch(() => {});
+    }
     if (err.statusCode) return error(res, err.message, err.statusCode, err.code);
     next(err);
   }

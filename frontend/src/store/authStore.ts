@@ -12,8 +12,8 @@ interface User {
 
 interface AuthState {
   user: User | null;
-  accessToken: string | null;
-  refreshToken: string | null;
+  accessToken: string | null;  // Memory-only — NOT persisted to localStorage (XSS protection)
+  refreshToken: string | null; // Persisted so silent refresh works after page reload
   isAuthenticated: boolean;
   setAuth: (user: User, accessToken: string, refreshToken: string) => void;
   setTokens: (accessToken: string, refreshToken: string) => void;
@@ -52,12 +52,15 @@ export const useAuthStore = create<AuthState>()(
     }),
     {
       name: 'fdms-auth',
+      // accessToken is intentionally excluded — it lives in memory only.
+      // On page reload, the 401 → refresh flow in api.ts will obtain a new
+      // access token using the persisted refreshToken.
       partialize: (state) => ({
         user: state.user,
-        accessToken: state.accessToken,
         refreshToken: state.refreshToken,
         isAuthenticated: state.isAuthenticated,
       }),
     }
   )
 );
+

@@ -14,7 +14,7 @@ const { query, withTransaction } = require('../../config/database');
 const { parsePagination } = require('../../utils/pagination');
 const { resolvePrice } = require('../products/products.service');
 const { reserveStock, releaseReservation } = require('../inventory/inventory.service');
-const { debitBusiness, creditBusiness } = require('../finance/finance.service');
+const { debitBusiness, creditBusiness, checkCreditLimit } = require('../finance/finance.service');
 const logger = require('../../utils/logger');
 
 const VALID_TRANSITIONS = {
@@ -123,44 +123,80 @@ async function createOrder(data, user) {
   const { businessId, warehouseId, items, notes, deliveryAddress, expectedDeliveryDate } = data;
 
   return withTransaction(async (client) => {
-    // Resolve prices and compute totals
-    let subtotal = 0;
+    // Resolve prices, fetch GST rates, compute totals
+    let subtotal  = 0;
+    let totalTax  = 0;
     const resolvedItems = [];
 
     for (const item of items) {
+      // 1. Pricing (effectivePrice already applies any discount)
       const pricing = await resolvePrice(item.productId, businessId, item.quantity);
       if (!pricing) {
         const err = new Error(`No pricing found for product ${item.productId}`);
         err.statusCode = 400; err.code = 'NO_PRICING'; throw err;
       }
 
-      const lineTotal = parseFloat(item.quantity) * pricing.effectivePrice;
-      subtotal += lineTotal;
+      // 2. GST rate from products table (stored as percentage, e.g. 18 = 18%)
+      const productRow = await client.query(
+        'SELECT gst_rate FROM products WHERE id = $1',
+        [item.productId]
+      );
+      const gstRate  = parseFloat(productRow.rows[0]?.gst_rate || 0);
+
+      // 3. Line totals (pre-tax subtotal + per-line tax)
+      const lineSubtotal = parseFloat(item.quantity) * pricing.effectivePrice;
+      const lineTax      = lineSubtotal * (gstRate / 100);
+
+      subtotal += lineSubtotal;
+      totalTax += lineTax;
 
       resolvedItems.push({
-        productId: item.productId,
-        quantity: item.quantity,
-        unitPrice: pricing.pricePerUnit,
+        productId:   item.productId,
+        quantity:    item.quantity,
+        unitPrice:   pricing.pricePerUnit,
         discountPct: pricing.discountPct,
-        lineTotal,
+        taxRate:     gstRate,
+        lineTotal:   lineSubtotal + lineTax,   // what's billed to the customer
       });
     }
 
-    // Create order
+    const totalAmount = subtotal + totalTax;
+
+    // ── Credit limit check ──────────────────────────────────────
+    // Validate against TOTAL (inc. GST) before any DB write.
+    const creditCheck = await checkCreditLimit(businessId, totalAmount);
+    if (!creditCheck.allowed) {
+      const err = new Error(creditCheck.reason);
+      err.statusCode = 422;
+      err.code = 'CREDIT_LIMIT_EXCEEDED';
+      throw err;
+    }
+
+    // Create order with correct financial breakdown
     const orderResult = await client.query(
-      `INSERT INTO orders (order_number, business_id, placed_by, warehouse_id, status, subtotal, total_amount, notes, delivery_address, expected_delivery_date)
-       VALUES ('', $1, $2, $3, 'pending', $4, $4, $5, $6, $7) RETURNING *`,
-      [businessId, user.id, warehouseId || null, subtotal, notes || null,
-       deliveryAddress ? JSON.stringify(deliveryAddress) : null, expectedDeliveryDate || null]
+      `INSERT INTO orders
+         (order_number, business_id, placed_by, warehouse_id, status,
+          subtotal, tax_amount, total_amount,
+          notes, delivery_address, expected_delivery_date)
+       VALUES ('', $1, $2, $3, 'pending', $4, $5, $6, $7, $8, $9) RETURNING *`,
+      [
+        businessId, user.id, warehouseId || null,
+        subtotal.toFixed(2), totalTax.toFixed(2), totalAmount.toFixed(2),
+        notes || null,
+        deliveryAddress ? JSON.stringify(deliveryAddress) : null,
+        expectedDeliveryDate || null,
+      ]
     );
     const order = orderResult.rows[0];
 
-    // Insert order items
+    // Insert order items — now includes tax_rate so invoices can show GST breakdown
     for (const item of resolvedItems) {
       await client.query(
-        `INSERT INTO order_items (order_id, product_id, quantity, unit_price, discount_pct, line_total)
-         VALUES ($1,$2,$3,$4,$5,$6)`,
-        [order.id, item.productId, item.quantity, item.unitPrice, item.discountPct, item.lineTotal]
+        `INSERT INTO order_items
+           (order_id, product_id, quantity, unit_price, discount_pct, tax_rate, line_total)
+         VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+        [order.id, item.productId, item.quantity,
+         item.unitPrice, item.discountPct, item.taxRate, item.lineTotal]
       );
     }
 
@@ -173,6 +209,7 @@ async function createOrder(data, user) {
     return order;
   });
 }
+
 
 // ── Status Transition ─────────────────────────────────────────
 

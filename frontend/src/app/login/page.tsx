@@ -69,7 +69,7 @@ export default function LoginPage() {
             borderRadius: 12, display: 'flex', alignItems: 'center', justifyContent: 'center',
           }}><Icons.Package size={22} color="#fff" /></div>
           <div>
-            <div style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800 }}>FDMS</div>
+            <div style={{ fontFamily: 'var(--font-head)', fontSize: 22, fontWeight: 800 }}>APX Desk</div>
             <div style={{ fontSize: 11, opacity: 0.7, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Distribution Platform</div>
           </div>
         </div>

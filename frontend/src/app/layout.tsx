@@ -3,9 +3,9 @@ import '@/styles/globals.css';
 import { Providers } from './providers';
 
 export const metadata: Metadata = {
-  title: 'FDMS — Fertilizer Distribution Management System',
-  description: 'B2B platform for fertilizer distribution — inventory, orders, finance, and warehouse operations.',
-  keywords: ['fertilizer', 'distribution', 'B2B', 'inventory', 'orders'],
+  title: 'APX Desk — Fertilizer Distribution Platform',
+  description: 'APX Desk — B2B platform for fertilizer distribution: inventory, orders, finance, and warehouse operations.',
+  keywords: ['fertilizer', 'distribution', 'B2B', 'inventory', 'orders', 'APX Desk'],
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import api from '@/lib/api';
 import Modal from '@/components/ui/Modal';
 import { Icons, IconX } from '@/components/ui/Icons';
+import { useToast } from '@/hooks/useToast';
 
 export default function AdminPage() {
   const qc = useQueryClient();
@@ -32,10 +33,16 @@ export default function AdminPage() {
     enabled: tab === 'audit',
   });
 
+  const toast = useToast();
+
   const deactivateMutation = useMutation({
     mutationFn: async ({ id, status }: { id: string; status: string }) =>
       api.patch(`/users/${id}`, { status }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      toast.success(`User ${vars.status === 'active' ? 'activated' : 'deactivated'}`);
+    },
+    onError: () => toast.error('Failed to update user status'),
   });
 
   const users: any[] = usersData?.data || [];
@@ -319,9 +326,14 @@ function CreateUserModal({ onClose }: { onClose: () => void }) {
   });
   const businesses: any[] = Array.isArray(bizData) ? bizData : [];
 
+  const toast = useToast();
+
   const mutation = useMutation({
     mutationFn: async () => (await api.post('/users', form)).data,
-    onSuccess: () => onClose(),
+    onSuccess: () => { toast.success('User created successfully'); onClose(); },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to create user');
+    },
   });
 
   const ROLE_OPTIONS = ['admin', 'retailer', 'warehouse_manager', 'sales_executive'];

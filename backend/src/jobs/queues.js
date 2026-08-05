@@ -37,9 +37,12 @@ function startWorkers(io) {
   require('./workers/smsWorker');
   require('./workers/stockAlertWorker');
 
-  // Start the scheduler
+  // Start the schedulers
   const expiryScanner = require('./schedulers/expiryScanner');
   expiryScanner.start(stockAlertQueue);
+
+  const reservationReaper = require('./schedulers/reservationReaper');
+  reservationReaper.start();
 
   logger.info('BullMQ workers started');
 }

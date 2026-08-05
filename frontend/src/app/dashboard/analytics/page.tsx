@@ -124,7 +124,8 @@ export default function AnalyticsPage() {
         <div className="card">
           <div className="card-header"><span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Icons.Dashboard size={16} color="#2563eb" /> Orders by Status</span></div>
           <div className="card-body">
-            {Object.entries(byStatus).map(([status, count]) => {
+            {Object.entries(byStatus).map(([status, rawCount]) => {
+              const count = rawCount as number;
               const pct = orders.length > 0 ? Math.round((count / orders.length) * 100) : 0;
               return (
                 <div key={status} style={{ marginBottom: 12 }}>
@@ -151,11 +152,11 @@ export default function AnalyticsPage() {
             <thead><tr><th>Retailer</th><th>Outstanding</th><th>Credit Used</th></tr></thead>
             <tbody>
               {topRetailers.length === 0
-                ? <tr><td colSpan={3} style={{ textAlign: 'center', padding: 30, color: '#9ca3af' }}>No data</td></tr>
+                ? <tr key="empty"><td colSpan={3} style={{ textAlign: 'center', padding: 30, color: '#9ca3af' }}>No data</td></tr>
                 : topRetailers.map(r => {
                   const pct = Number(r.credit_limit) > 0 ? Math.min(100, (Number(r.current_balance) / Number(r.credit_limit)) * 100) : 0;
                   return (
-                    <tr key={r.business_id}>
+                    <tr key={r.id || r.business_id}>
                       <td style={{ fontWeight: 600 }}>{r.business_name}</td>
                       <td style={{ color: Number(r.current_balance) > 0 ? '#dc2626' : '#059669', fontWeight: 700 }}>
                         ₹{Number(r.current_balance).toLocaleString('en-IN')}

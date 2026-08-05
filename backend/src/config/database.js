@@ -13,6 +13,8 @@ function getPool() {
       max: parseInt(process.env.DB_POOL_MAX) || 20,
       idleTimeoutMillis: 30000,
       connectionTimeoutMillis: 5000,
+      // Neon / Railway / RDS all require SSL in production
+      ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : false,
     });
 
     pool.on('connect', () => {

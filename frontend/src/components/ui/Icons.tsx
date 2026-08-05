@@ -309,6 +309,43 @@ const IconTag = ({ size = 16, color }: { size?: number; color?: string }) => (
   </SvgBase>
 );
 
+const IconTarget = ({ size = 16, color }: { size?: number; color?: string }) => (
+  <SvgBase size={size}>
+    <circle cx="8" cy="8" r="6.5" stroke={color || 'currentColor'} strokeWidth="1.3"/>
+    <circle cx="8" cy="8" r="3.5" stroke={color || 'currentColor'} strokeWidth="1.2"/>
+    <circle cx="8" cy="8" r="1" fill={color || 'currentColor'}/>
+    <path d="M8 1.5V3M8 13V14.5M1.5 8H3M13 8H14.5" stroke={color || 'currentColor'} strokeWidth="1.3" strokeLinecap="round"/>
+  </SvgBase>
+);
+
+const IconLeaf = ({ size = 16, color }: { size?: number; color?: string }) => (
+  <SvgBase size={size}>
+    <path d="M3 13c2-5 4-9 10-10C13 9 9 12 3 13z" stroke={color || 'currentColor'} strokeWidth="1.3" strokeLinejoin="round"/>
+    <path d="M3 13L7 9" stroke={color || 'currentColor'} strokeWidth="1.3" strokeLinecap="round"/>
+  </SvgBase>
+);
+
+const IconUser = ({ size = 16, color }: { size?: number; color?: string }) => (
+  <SvgBase size={size}>
+    <circle cx="8" cy="5.5" r="3" stroke={color || 'currentColor'} strokeWidth="1.3"/>
+    <path d="M2 14c0-3.314 2.686-5 6-5s6 1.686 6 5" stroke={color || 'currentColor'} strokeWidth="1.3" strokeLinecap="round"/>
+  </SvgBase>
+);
+
+const IconMapPin = ({ size = 16, color }: { size?: number; color?: string }) => (
+  <SvgBase size={size}>
+    <path d="M8 1.5A4.5 4.5 0 0112.5 6c0 3-4.5 8.5-4.5 8.5S3 9 3 6A4.5 4.5 0 018 1.5z" stroke={color || 'currentColor'} strokeWidth="1.3" strokeLinejoin="round"/>
+    <circle cx="8" cy="6" r="1.5" stroke={color || 'currentColor'} strokeWidth="1.2"/>
+  </SvgBase>
+);
+
+const IconTrendingUp = ({ size = 16, color }: { size?: number; color?: string }) => (
+  <SvgBase size={size}>
+    <path d="M1.5 11.5L6 7l3 3 5.5-6" stroke={color || 'currentColor'} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+    <path d="M10.5 4.5H15v4.5" stroke={color || 'currentColor'} strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+  </SvgBase>
+);
+
 // ── Icons namespace — used by Sidebar.tsx, Topbar, Dashboards ─
 // Provides Icons.Dashboard, Icons.LogOut etc. as a single import.
 
@@ -346,4 +383,9 @@ export const Icons = {
   Trash:         IconTrash,
   Scale:         IconScale,
   Tag:           IconTag,
+  Target:        IconTarget,
+  Leaf:          IconLeaf,
+  User:          IconUser,
+  MapPin:        IconMapPin,
+  TrendingUp:    IconTrendingUp,
 };

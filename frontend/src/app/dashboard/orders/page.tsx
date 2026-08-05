@@ -7,6 +7,7 @@ import { useAuthStore } from '@/store/authStore';
 import CreateOrderModal from '@/components/ui/CreateOrderModal';
 import Modal from '@/components/ui/Modal';
 import { Icons, IconX, IconWarning } from '@/components/ui/Icons';
+import { useToast } from '@/hooks/useToast';
 
 // ── Helpers ───────────────────────────────────────────────────
 
@@ -217,13 +218,20 @@ export default function OrdersPage() {
     },
   });
 
+  const toast = useToast();
+
   const statusMutation = useMutation({
     mutationFn: async ({ orderId, status }: { orderId: string; status: string }) =>
       (await api.patch(`/orders/${orderId}/status`, { status })).data,
-    onSuccess: () => {
+    onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ['orders'] });
       qc.invalidateQueries({ queryKey: ['order-detail'] });
       setSelectedOrder(null);
+      toast.success(`Order status updated to ${vars.status}`);
+    },
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to update status';
+      toast.error(msg);
     },
   });
 
@@ -335,6 +343,7 @@ export default function OrdersPage() {
 
 function StatusModal({ order, onClose, onStatusChange, isLoading }: any) {
   const qc = useQueryClient();
+  const toast = useToast();
   const [warehouseId, setWarehouseId] = useState('');
   const needsWarehouse = order.status === 'pending' && !order.warehouse_id;
 
@@ -347,7 +356,8 @@ function StatusModal({ order, onClose, onStatusChange, isLoading }: any) {
 
   const assignMutation = useMutation({
     mutationFn: async () => (await api.patch(`/orders/${order.id}/warehouse`, { warehouseId })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); onClose(); },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); onClose(); toast.success('Warehouse assigned'); },
+    onError: (err: unknown) => { toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Assignment failed'); },
   });
 
   const T: Record<string, string[]> = {

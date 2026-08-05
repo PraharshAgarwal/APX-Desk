@@ -5,6 +5,7 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { query } = require('../../config/database');
 const { config } = require('../../config/env');
+const { invalidateUserCache } = require('../../middleware/auth');
 const logger = require('../../utils/logger');
 
 /**
@@ -117,6 +118,8 @@ async function logout(userId, refreshToken) {
       [userId, tokenHash]
     );
   }
+  // Invalidate Redis cache so the session is immediately unusable
+  await invalidateUserCache(userId);
 }
 
 // ── Internal helpers ──────────────────────────────────────────

@@ -8,17 +8,20 @@ import Link from 'next/link';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { Icons, IconCheck } from '@/components/ui/Icons';
+import QueryError from '@/components/ui/QueryError';
+import { SkeletonStatGrid, SkeletonTable } from '@/components/ui/Skeleton';
+import type { Order, StockSummary, InventoryBatch, GRN } from '@/types';
+import { useToast } from '@/hooks/useToast';
 
 export default function WarehouseDashboard() {
   const router = useRouter();
   const { user } = useAuthStore();
   const qc = useQueryClient();
-  const [showGRN, setShowGRN] = useState(false);
-  // dispatching form state: null = no form open; string = orderId whose form is open
   const [dispatchingId, setDispatchingId] = useState<string | null>(null);
   const [vehicleNumber, setVehicleNumber] = useState('');
   const [driverName, setDriverName]       = useState('');
   const [pickError, setPickError]         = useState<string | null>(null);
+  const toast = useToast();
 
   const openDispatchForm = (orderId: string) => {
     setDispatchingId(orderId);
@@ -28,8 +31,7 @@ export default function WarehouseDashboard() {
   };
   const closeDispatchForm = () => { setDispatchingId(null); setPickError(null); };
 
-  // Fetch both confirmed + processing orders — both are dispatchable
-  const { data: dispatchQueue } = useQuery({
+  const { data: dispatchQueue, isError: dispatchErr, refetch: refetchDispatch } = useQuery({
     queryKey: ['orders-dispatchable'],
     queryFn: async () => {
       const [proc, conf] = await Promise.all([
@@ -39,24 +41,11 @@ export default function WarehouseDashboard() {
       return { data: [...(proc.data?.data || []), ...(conf.data?.data || [])] };
     },
   });
-  const { data: stock } = useQuery({
-    queryKey: ['stock-summary'],
-    queryFn: async () => (await api.get('/inventory/stock')).data,
-  });
-  const { data: nearExpiry } = useQuery({
-    queryKey: ['near-expiry'],
-    queryFn: async () => (await api.get('/inventory/near-expiry')).data,
-  });
-  const { data: grns } = useQuery({
-    queryKey: ['grns'],
-    queryFn: async () => (await api.get('/warehouse/grn')).data,
-  });
-  const { data: adjustments } = useQuery({
-    queryKey: ['adjustments'],
-    queryFn: async () => (await api.get('/inventory/adjustments')).data,
-  });
+  const { data: stock, isError: stockErr, refetch: refetchStock } = useQuery({ queryKey: ['stock-summary'],  queryFn: async () => (await api.get('/inventory/stock')).data });
+  const { data: nearExpiry }  = useQuery({ queryKey: ['near-expiry'],    queryFn: async () => (await api.get('/inventory/near-expiry')).data });
+  const { data: grns }        = useQuery({ queryKey: ['grns'],           queryFn: async () => (await api.get('/warehouse/grn')).data });
+  const { data: adjustments } = useQuery({ queryKey: ['adjustments'],   queryFn: async () => (await api.get('/inventory/adjustments')).data });
 
-  // Dispatch with vehicle + driver — skip separate pick step (service handles it)
   const pickMutation = useMutation({
     mutationFn: async ({ orderId, vehicleNumber, driverName }: { orderId: string; vehicleNumber: string; driverName: string }) =>
       api.post(`/warehouse/dispatch/${orderId}`, { vehicleNumber, driverName }),
@@ -65,27 +54,28 @@ export default function WarehouseDashboard() {
       closeDispatchForm();
       qc.invalidateQueries({ queryKey: ['orders-dispatchable'] });
       qc.invalidateQueries({ queryKey: ['dispatches'] });
+      toast.success('Order dispatched successfully');
     },
-    onError: (err: any) => {
-      const msg = err?.response?.data?.message || err?.message || 'Dispatch failed';
-      setPickError(msg);
+    onError: (err: unknown) => {
+      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message || err instanceof Error ? (err as Error).message : 'Dispatch failed';
+      setPickError(typeof msg === 'string' ? msg : 'Dispatch failed');
+      toast.error(typeof msg === 'string' ? msg : 'Dispatch failed');
     },
   });
 
-  const dispatchList: any[]  = dispatchQueue?.data || [];
-  const confirmedList: any[] = [];
-  const stockItems: any[]    = stock?.data || [];
-  const expiryBatches: any[] = nearExpiry?.data || [];
-  const grnList: any[] = (grns?.data || []).slice(0, 4);
-  const adjList: any[] = (adjustments?.data || []).slice(0, 4);
+  const dispatchList: Order[]         = dispatchQueue?.data || [];
+  const confirmedList: Order[]         = [];
+  const stockItems: StockSummary[]     = stock?.data || [];
+  const expiryBatches: InventoryBatch[] = nearExpiry?.data || [];
+  const grnList: GRN[]                 = (grns?.data || []).slice(0, 4);
+  const adjList: Record<string,unknown>[] = (adjustments?.data || []).slice(0, 4);
 
-  // Aggregate by product_id to get total available across all warehouses
+  // Aggregate stock by product across all warehouses
   const stockByProduct = stockItems.reduce((acc: Record<string, any>, s: any) => {
     if (!acc[s.product_id]) {
       acc[s.product_id] = { ...s, available_qty: Number(s.available_qty) };
     } else {
       acc[s.product_id].available_qty += Number(s.available_qty);
-      // Use earliest expiry
       if (s.nearest_expiry && (!acc[s.product_id].nearest_expiry || s.nearest_expiry < acc[s.product_id].nearest_expiry)) {
         acc[s.product_id].nearest_expiry = s.nearest_expiry;
       }
@@ -94,68 +84,84 @@ export default function WarehouseDashboard() {
   }, {});
   const aggregatedStock: any[] = Object.values(stockByProduct);
   const criticalExpiry = expiryBatches.filter((b: any) => b.days_until_expiry <= 7);
-  const lowStock = aggregatedStock.filter((s: any) => Number(s.available_qty) < 100);
+  const lowStock       = aggregatedStock.filter((s: any) => Number(s.available_qty) < Number(s.low_stock_threshold || 100));
 
   return (
     <div className="animate-in">
       {/* Ops Banner */}
-      <div style={{ background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)', borderRadius: 14, padding: '20px 28px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
-            Ops Dashboard — {user?.firstName}
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.85 }}>
+      <div className="banner banner-amber">
+        <div className="banner-left">
+          <div className="banner-title">Ops Dashboard — {user?.firstName}</div>
+          <div className="banner-subtitle">
             {dispatchList.length > 0
               ? `${dispatchList.length} order${dispatchList.length > 1 ? 's' : ''} ready to dispatch`
               : confirmedList.length > 0 ? `${confirmedList.length} confirmed, waiting processing` : 'All clear — no pending dispatches'}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" onClick={() => router.push('/dashboard/warehouse')} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="banner-actions">
+          <button type="button" onClick={() => router.push('/dashboard/warehouse')} className="btn-banner-ghost">
             <Icons.Clipboard size={14} color="#fff" /> GRN
           </button>
-          <button type="button" onClick={() => router.push('/dashboard/inventory')} style={{ background: '#fff', border: 'none', color: '#b45309', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          <button type="button" onClick={() => router.push('/dashboard/inventory')} className="btn-banner-solid btn-banner-solid-amber">
             View Inventory
           </button>
         </div>
       </div>
 
       {/* Operational Stats */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 14, marginBottom: 24 }}>
-        <div className="stat-card amber">
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Dispatch Queue</div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color: dispatchList.length > 0 ? '#b45309' : '#1a1d23' }}>{dispatchList.length}</div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Ready to pick & ship</div>
-        </div>
-        <div className="stat-card blue">
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Confirmed Orders</div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color: '#1a1d23' }}>{confirmedList.length}</div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Awaiting processing</div>
-        </div>
-        <div className={`stat-card ${criticalExpiry.length > 0 ? 'red' : 'green'}`}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Critical Expiry</div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color: criticalExpiry.length > 0 ? '#dc2626' : '#059669' }}>{criticalExpiry.length}</div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Batches expiring ≤7 days</div>
-        </div>
-        <div className={`stat-card ${lowStock.length > 0 ? 'red' : 'green'}`}>
-          <div style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 8 }}>Low Stock SKUs</div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color: lowStock.length > 0 ? '#dc2626' : '#059669' }}>{lowStock.length}</div>
-          <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>Below reorder point</div>
-        </div>
+      <div className="stats-grid-4">
+        <Link href="/dashboard/orders?status=processing" className="stat-card amber"
+          style={{ display: 'block', textDecoration: 'none', color: 'inherit', transition: 'transform 0.15s, box-shadow 0.15s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.10)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = ''; (e.currentTarget as HTMLAnchorElement).style.boxShadow = ''; }}
+        >
+          <div className="stat-label">Dispatch Queue</div>
+          <div className={`stat-value ${dispatchList.length > 0 ? 'stat-value-amber' : ''}`}>{dispatchList.length}</div>
+          <div className="stat-sub">Ready to pick &amp; ship</div>
+        </Link>
+        <Link href="/dashboard/orders?status=confirmed" className="stat-card blue"
+          style={{ display: 'block', textDecoration: 'none', color: 'inherit', transition: 'transform 0.15s, box-shadow 0.15s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.10)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = ''; (e.currentTarget as HTMLAnchorElement).style.boxShadow = ''; }}
+        >
+          <div className="stat-label">Confirmed Orders</div>
+          <div className="stat-value">{confirmedList.length}</div>
+          <div className="stat-sub">Awaiting processing</div>
+        </Link>
+        <Link href="/dashboard/inventory?filter=expiring" className={`stat-card ${criticalExpiry.length > 0 ? 'red' : 'green'}`}
+          style={{ display: 'block', textDecoration: 'none', color: 'inherit', transition: 'transform 0.15s, box-shadow 0.15s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.10)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = ''; (e.currentTarget as HTMLAnchorElement).style.boxShadow = ''; }}
+        >
+          <div className="stat-label">Critical Expiry</div>
+          <div className={`stat-value ${criticalExpiry.length > 0 ? 'stat-value-red' : 'stat-value-green'}`}>{criticalExpiry.length}</div>
+          <div className="stat-sub">Batches expiring ≤7 days</div>
+        </Link>
+        <Link href="/dashboard/inventory?filter=low" className={`stat-card ${lowStock.length > 0 ? 'red' : 'green'}`}
+          style={{ display: 'block', textDecoration: 'none', color: 'inherit', transition: 'transform 0.15s, box-shadow 0.15s' }}
+          onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.10)'; }}
+          onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = ''; (e.currentTarget as HTMLAnchorElement).style.boxShadow = ''; }}
+        >
+          <div className="stat-label">Low Stock SKUs</div>
+          <div className={`stat-value ${lowStock.length > 0 ? 'stat-value-red' : 'stat-value-green'}`}>{lowStock.length}</div>
+          <div className="stat-sub">Below reorder point</div>
+        </Link>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="content-grid-2">
         {/* Dispatch Queue */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Icons.Truck size={16} color="#d97706" /> Dispatch Queue</span>
+            <span className="card-title card-title-row"><Icons.Truck size={16} color="#d97706" /> Dispatch Queue</span>
             <Link href="/dashboard/warehouse"><span style={{ fontSize: 12, color: '#d97706', fontWeight: 600, cursor: 'pointer' }}>Full dispatch →</span></Link>
           </div>
           <table className="data-table">
             <thead><tr><th>Order #</th><th>Business</th><th>Amount</th><th>Action</th></tr></thead>
             <tbody>
-              {dispatchList.length === 0
-                ? <tr><td colSpan={4} style={{ textAlign: 'center', padding: 32, color: '#9ca3af' }}>
+              {dispatchErr
+                ? <tr><td colSpan={4}><QueryError error={dispatchErr} onRetry={refetchDispatch} compact /></td></tr>
+                : dispatchList.length === 0
+                ? <tr><td colSpan={4} className="empty-cell">
                     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>Queue is clear <IconCheck size={13} /></span>
                   </td></tr>
                 : dispatchList.slice(0, 5).map((o: any) => (
@@ -166,47 +172,46 @@ export default function WarehouseDashboard() {
                       <td>₹{Number(o.total_amount).toLocaleString('en-IN')}</td>
                       <td>
                         {dispatchingId !== o.id
-                          ? <button type="button" onClick={() => openDispatchForm(o.id)}
-                              style={{ fontSize: 11, fontWeight: 700, color: '#fff', background: '#d97706', border: 'none', padding: '4px 10px', borderRadius: 6, cursor: 'pointer' }}>
+                          ? <button type="button" onClick={() => openDispatchForm(o.id)} className="btn-action btn-action-amber">
                               Pick &amp; Ship
                             </button>
-                          : <button type="button" onClick={closeDispatchForm}
-                              style={{ fontSize: 11, fontWeight: 600, color: '#6b7280', background: '#f3f4f6', border: '1px solid #e5e7eb', padding: '4px 10px', borderRadius: 6, cursor: 'pointer' }}>
+                          : <button type="button" onClick={closeDispatchForm} className="btn-action btn-action-cancel">
                               Cancel
                             </button>}
                       </td>
                     </tr>
                     {dispatchingId === o.id && (
                       <tr key={`${o.id}-form`}>
-                        <td colSpan={4} style={{ padding: '10px 14px 14px', background: '#fffbeb', borderTop: 'none', borderBottom: '2px solid #fde68a' }}>
-                          <div style={{ fontSize: 12, fontWeight: 700, color: '#92400e', marginBottom: 8 }}>Dispatch details for {o.order_number}</div>
-                          <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                              <label style={{ fontSize: 11, fontWeight: 600, color: '#6b7280' }}>Vehicle No. <span style={{ color: '#dc2626' }}>*</span></label>
+                        <td colSpan={4} className="dispatch-form">
+                          <div className="dispatch-form-title">Dispatch details for {o.order_number}</div>
+                          <div className="dispatch-form-fields">
+                            <div className="dispatch-field">
+                              <label className="dispatch-label">Vehicle No. <span style={{ color: '#dc2626' }}>*</span></label>
                               <input
+                                className="dispatch-input"
                                 value={vehicleNumber}
                                 onChange={e => setVehicleNumber(e.target.value)}
                                 placeholder="MH 12 AB 1234"
-                                style={{ fontSize: 12, padding: '5px 10px', borderRadius: 7, border: '1px solid #d97706', outline: 'none', width: 150 }}
                               />
                             </div>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-                              <label style={{ fontSize: 11, fontWeight: 600, color: '#6b7280' }}>Driver Name <span style={{ color: '#dc2626' }}>*</span></label>
+                            <div className="dispatch-field">
+                              <label className="dispatch-label">Driver Name <span style={{ color: '#dc2626' }}>*</span></label>
                               <input
+                                className="dispatch-input"
                                 value={driverName}
                                 onChange={e => setDriverName(e.target.value)}
                                 placeholder="Driver name"
-                                style={{ fontSize: 12, padding: '5px 10px', borderRadius: 7, border: '1px solid #d97706', outline: 'none', width: 150 }}
                               />
                             </div>
                             <button type="button"
                               onClick={() => pickMutation.mutate({ orderId: o.id, vehicleNumber, driverName })}
                               disabled={!vehicleNumber.trim() || !driverName.trim() || pickMutation.isPending}
-                              style={{ fontSize: 12, fontWeight: 700, color: '#fff', background: vehicleNumber.trim() && driverName.trim() ? '#d97706' : '#d1d5db', border: 'none', padding: '6px 16px', borderRadius: 7, cursor: vehicleNumber.trim() && driverName.trim() ? 'pointer' : 'not-allowed', height: 32 }}>
+                              className="btn-action btn-action-amber"
+                              style={{ height: 32, opacity: (!vehicleNumber.trim() || !driverName.trim()) ? 0.5 : 1 }}>
                               {pickMutation.isPending ? 'Dispatching…' : 'Confirm Dispatch'}
                             </button>
                           </div>
-                          {pickError && <div style={{ marginTop: 6, fontSize: 11, color: '#dc2626', fontWeight: 600 }}>{pickError}</div>}
+                          {pickError && <div className="dispatch-error">{pickError}</div>}
                         </td>
                       </tr>
                     )}
@@ -219,33 +224,35 @@ export default function WarehouseDashboard() {
         {/* Stock Levels */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Icons.Package size={16} color="#059669" /> Live Stock Levels</span>
+            <span className="card-title card-title-row"><Icons.Package size={16} color="#059669" /> Live Stock Levels</span>
             <Link href="/dashboard/inventory"><span style={{ fontSize: 12, color: '#059669', fontWeight: 600, cursor: 'pointer' }}>Full inventory →</span></Link>
           </div>
-          <div style={{ padding: '8px 16px' }}>
-            {aggregatedStock.length === 0
-              ? <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af' }}>No stock data</div>
+          <div className="card-section">
+            {stockErr
+              ? <QueryError error={stockErr} onRetry={refetchStock} />
+              : aggregatedStock.length === 0
+              ? <div className="text-center-muted">No stock data</div>
               : aggregatedStock.map((s: any) => {
-                const qty = Number(s.available_qty || 0);
-                const maxQty = 1000;
-                const pct = Math.min(100, (qty / maxQty) * 100);
-                const isLow = qty < 100;
+                  const qty       = Number(s.available_qty || 0);
+                  const threshold = Number(s.low_stock_threshold || 100);
+                  // Bar fills relative to 2× the reorder threshold so half-bar = healthy
+                  const maxQty    = Math.max(threshold * 2, qty);
+                  const pct       = Math.min(100, (qty / maxQty) * 100);
+                  const isLow     = qty < threshold;
                 return (
-                  <div key={s.product_id} style={{ marginBottom: 14 }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>{s.product_name}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: isLow ? '#dc2626' : '#059669' }}>
+                  <div key={s.product_id} className="stock-item">
+                    <div className="stock-header">
+                      <span className="stock-name">{s.product_name}</span>
+                      <span className={`stock-qty ${isLow ? 'low' : 'ok'}`}>
                         {qty.toFixed(0)} bags
-                        {isLow && <span style={{ marginLeft: 6, fontSize: 10, background: '#fef2f2', color: '#dc2626', padding: '1px 5px', borderRadius: 10, border: '1px solid #fecaca' }}>LOW</span>}
+                        {isLow && <span className="low-tag">LOW</span>}
                       </span>
                     </div>
-                    <div style={{ height: 7, background: '#f3f4f6', borderRadius: 4 }}>
-                      <div style={{ height: '100%', width: `${pct}%`, background: isLow ? '#ef4444' : '#10b981', borderRadius: 4 }} />
+                    <div className="progress-bar">
+                      <div className={`progress-fill ${isLow ? 'red' : 'green'}`} style={{ width: `${pct}%` }} />
                     </div>
                     {s.nearest_expiry && (
-                      <div style={{ fontSize: 11, color: '#9ca3af', marginTop: 2 }}>
-                        Next expiry: {new Date(s.nearest_expiry).toLocaleDateString('en-IN')}
-                      </div>
+                      <div className="stock-expiry">Next expiry: {new Date(s.nearest_expiry).toLocaleDateString('en-IN')}</div>
                     )}
                   </div>
                 );
@@ -255,36 +262,38 @@ export default function WarehouseDashboard() {
       </div>
 
       {/* Alerts + Recent Activity */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+      <div className="content-grid-2">
         {/* Expiry Alerts */}
         <div className="card" style={{ border: expiryBatches.length > 0 ? '1px solid #fecaca' : '1px solid #e5e7eb' }}>
           <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Icons.AlertTriangle size={16} color="#dc2626" /> Alerts</span>
+            <span className="card-title card-title-row"><Icons.AlertTriangle size={16} color="#dc2626" /> Alerts</span>
             <Link href="/dashboard/inventory?nearExpiry=true"><span style={{ fontSize: 12, color: '#dc2626', fontWeight: 600, cursor: 'pointer' }}>See all</span></Link>
           </div>
-          <div style={{ padding: '8px 12px' }}>
+          <div className="card-section-sm">
             {expiryBatches.length === 0 && lowStock.length === 0
-              ? <div style={{ padding: 20, textAlign: 'center', color: '#9ca3af', fontSize: 13, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>All good — no alerts <IconCheck size={13} /></div>
+              ? <div className="text-center-muted" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6 }}>
+                  All good — no alerts <IconCheck size={13} />
+                </div>
               : <>
                 {expiryBatches.slice(0, 3).map((b: any) => (
-                  <div key={b.id} style={{ display: 'flex', gap: 10, padding: '10px 0', borderBottom: '1px solid #f9fafb', alignItems: 'flex-start' }}>
-                    <span style={{ display: 'inline-flex', marginTop: 2, flexShrink: 0 }}>
+                  <div key={b.id} className="alert-item">
+                    <span className="alert-icon">
                       {b.days_until_expiry <= 7
                         ? <Icons.AlertCircle size={16} color="#ef4444" />
                         : <Icons.Clock size={16} color="#f59e0b" />}
                     </span>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{b.product_name} — Expiry Warning</div>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>Batch {b.batch_number} expires in {b.days_until_expiry} days. {Number(b.quantity).toFixed(0)} bags remaining.</div>
+                      <div className="alert-title">{b.product_name} — Expiry Warning</div>
+                      <div className="alert-body">Batch {b.batch_number} expires in {b.days_until_expiry} days. {Number(b.quantity).toFixed(0)} bags remaining.</div>
                     </div>
                   </div>
                 ))}
                 {lowStock.slice(0, 2).map((s: any) => (
-                  <div key={s.product_id} style={{ display: 'flex', gap: 10, padding: '10px 0', borderBottom: '1px solid #f9fafb', alignItems: 'flex-start' }}>
-                    <span style={{ display: 'inline-flex', marginTop: 2, flexShrink: 0 }}><Icons.AlertCircle size={16} color="#ef4444" /></span>
+                  <div key={s.product_id} className="alert-item">
+                    <span className="alert-icon"><Icons.AlertCircle size={16} color="#ef4444" /></span>
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 600 }}>{s.product_name} — Low Stock</div>
-                      <div style={{ fontSize: 12, color: '#6b7280' }}>Only {Number(s.available_qty).toFixed(0)} bags available. Below reorder point.</div>
+                      <div className="alert-title">{s.product_name} — Low Stock</div>
+                      <div className="alert-body">Only {Number(s.available_qty).toFixed(0)} bags available. Below reorder point.</div>
                     </div>
                   </div>
                 ))}
@@ -295,32 +304,32 @@ export default function WarehouseDashboard() {
         {/* Recent GRNs + Adjustments */}
         <div className="card">
           <div className="card-header">
-            <span className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 7 }}><Icons.Clipboard size={16} color="#059669" /> Recent Activity</span>
+            <span className="card-title card-title-row"><Icons.Clipboard size={16} color="#059669" /> Recent Activity</span>
             <Link href="/dashboard/warehouse"><span style={{ fontSize: 12, color: '#059669', fontWeight: 600, cursor: 'pointer' }}>Warehouse →</span></Link>
           </div>
-          <div style={{ padding: '8px 12px' }}>
+          <div className="card-section-sm">
             {grnList.map((g: any) => (
-              <div key={g.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f9fafb', alignItems: 'center' }}>
+              <div key={g.id} className="activity-item">
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{g.grn_number} <span style={{ fontWeight: 400, color: '#6b7280' }}>— GRN</span></div>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{g.supplier_name || 'No supplier'} · {new Date(g.created_at).toLocaleDateString('en-IN')}</div>
+                  <div className="activity-title">{g.grn_number} <span style={{ fontWeight: 400, color: '#6b7280' }}>— GRN</span></div>
+                  <div className="activity-sub">{g.supplier_name || 'No supplier'} · {new Date(g.created_at).toLocaleDateString('en-IN')}</div>
                 </div>
                 <span className={`badge ${g.status === 'completed' ? 'badge-green' : 'badge-amber'}`}>{g.status}</span>
               </div>
             ))}
             {adjList.map((a: any) => (
-              <div key={a.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f9fafb', alignItems: 'center' }}>
+              <div key={a.id} className="activity-item">
                 <div>
-                  <div style={{ fontSize: 12, fontWeight: 600 }}>{a.product_name || 'Adjustment'} <span style={{ fontWeight: 400, color: '#6b7280' }}>— Adj</span></div>
-                  <div style={{ fontSize: 11, color: '#9ca3af' }}>{a.reason} · {Number(a.quantity_delta) > 0 ? '+' : ''}{Number(a.quantity_delta).toFixed(0)} bags</div>
+                  <div className="activity-title">{a.product_name || 'Adjustment'} <span style={{ fontWeight: 400, color: '#6b7280' }}>— Adj</span></div>
+                  <div className="activity-sub">{a.reason} · {Number(a.quantity_delta) > 0 ? '+' : ''}{Number(a.quantity_delta).toFixed(0)} bags</div>
                 </div>
-                <span style={{ fontSize: 12, fontWeight: 700, color: Number(a.quantity_delta) < 0 ? '#dc2626' : '#059669' }}>
+                <span className={Number(a.quantity_delta) < 0 ? 'delta-negative' : 'delta-positive'}>
                   {Number(a.quantity_delta) > 0 ? '+' : ''}{Number(a.quantity_delta).toFixed(0)}
                 </span>
               </div>
             ))}
             {grnList.length === 0 && adjList.length === 0 && (
-              <div style={{ padding: 24, textAlign: 'center', color: '#9ca3af', fontSize: 13 }}>No recent activity</div>
+              <div className="text-center-muted">No recent activity</div>
             )}
           </div>
         </div>

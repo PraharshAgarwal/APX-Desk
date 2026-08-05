@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { body } = require('express-validator');
+const { body, param } = require('express-validator');
 const { validate } = require('../../utils/validators');
 const controller = require('./inventory.controller');
 const { requireRoles } = require('../../middleware/rbac');
@@ -9,6 +9,7 @@ const { auditLogger } = require('../../middleware/auditLogger');
 
 const router = express.Router();
 const WH_ADMIN = requireRoles('admin', 'warehouse_manager');
+const UUID_RE  = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // GET /api/inventory/batches
 router.get('/batches', WH_ADMIN, controller.listBatches);
@@ -35,7 +36,18 @@ router.post(
 );
 
 // PATCH /api/inventory/batches/:id — update bin location
-router.patch('/batches/:id', WH_ADMIN, auditLogger('inventory_batch'), controller.updateBatch);
+router.patch(
+  '/batches/:id',
+  WH_ADMIN,
+  auditLogger('inventory_batch'),
+  [
+    param('id').matches(UUID_RE).withMessage('id must be a valid UUID'),
+    body('binLocation').optional().trim().isLength({ max: 50 }),
+    body('notes').optional().trim().isLength({ max: 500 }),
+    validate,
+  ],
+  controller.updateBatch
+);
 
 // POST /api/inventory/adjust — stock adjustment
 router.post(

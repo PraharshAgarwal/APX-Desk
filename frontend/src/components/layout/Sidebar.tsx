@@ -34,6 +34,15 @@ const ADMIN_NAV: NavSection[] = [
     ],
   },
   {
+    section: 'INTELLIGENCE',
+    items: [
+      { icon: <Icons.Analytics size={16} />, label: 'Pricing Engine',  href: '/dashboard/admin/pricing' },
+      { icon: <Icons.Warehouse size={16} />, label: 'Fleet & Vehicles', href: '/dashboard/admin/fleet' },
+      { icon: <Icons.Reports size={16} />,   label: 'Demand Forecast',  href: '/dashboard/admin/forecast' },
+      { icon: <Icons.Orders size={16} />,    label: 'WhatsApp Orders',  href: '/dashboard/admin/whatsapp' },
+    ],
+  },
+  {
     section: 'SYSTEM',
     items: [
       { icon: <Icons.Admin size={16} />,    label: 'Users & Roles',    href: '/dashboard/admin' },
@@ -44,23 +53,31 @@ const ADMIN_NAV: NavSection[] = [
 
 const FLAT_NAV: Record<string, NavItem[]> = {
   retailer: [
-    { icon: <Icons.Dashboard size={16} />, label: 'Dashboard', href: '/dashboard' },
-    { icon: <Icons.Products size={16} />,  label: 'Products',  href: '/dashboard/products' },
-    { icon: <Icons.Orders size={16} />,    label: 'My Orders', href: '/dashboard/orders' },
-    { icon: <Icons.Finance size={16} />,   label: 'Account',   href: '/dashboard/finance' },
+    { icon: <Icons.Dashboard size={16} />, label: 'Dashboard',      href: '/dashboard' },
+    { icon: <Icons.Products size={16} />,  label: 'Place Order',    href: '/dashboard/sales/place-order' },
+    { icon: <Icons.Orders size={16} />,    label: 'My Orders',      href: '/dashboard/orders' },
+    { icon: <Icons.Warehouse size={16} />, label: 'Track Shipment', href: '/dashboard/orders/track' },
+    { icon: <Icons.Finance size={16} />,   label: 'Invoices',       href: '/dashboard/retailers/invoices' },
+    { icon: <Icons.Finance size={16} />,   label: 'Account',        href: '/dashboard/retailers/account' },
+    { icon: <Icons.Admin size={16} />,     label: 'Business Profile', href: '/dashboard/retailers/profile' },
   ],
   warehouse_manager: [
-    { icon: <Icons.Dashboard size={16} />, label: 'Dashboard', href: '/dashboard' },
-    { icon: <Icons.Inventory size={16} />, label: 'Inventory', href: '/dashboard/inventory' },
-    { icon: <Icons.Orders size={16} />,    label: 'Orders',    href: '/dashboard/orders' },
-    { icon: <Icons.Warehouse size={16} />, label: 'Warehouse', href: '/dashboard/warehouse' },
+    { icon: <Icons.Dashboard size={16} />, label: 'Dashboard',      href: '/dashboard' },
+    { icon: <Icons.Inventory size={16} />, label: 'Inventory',      href: '/dashboard/inventory' },
+    { icon: <Icons.Orders size={16} />,    label: 'Orders',         href: '/dashboard/orders' },
+    { icon: <Icons.Warehouse size={16} />, label: 'Warehouse Ops',  href: '/dashboard/warehouse' },
+    { icon: <Icons.Products size={16} />,  label: 'Inter-WH Transfer', href: '/dashboard/warehouse/transfer' },
   ],
   sales_executive: [
-    { icon: <Icons.Dashboard size={16} />, label: 'Dashboard', href: '/dashboard' },
-    { icon: <Icons.Products size={16} />,  label: 'Products',  href: '/dashboard/products' },
-    { icon: <Icons.Orders size={16} />,    label: 'Orders',    href: '/dashboard/orders' },
-    { icon: <Icons.Store size={16} />,     label: 'Retailers', href: '/dashboard/retailers' },
-    { icon: <Icons.Finance size={16} />,   label: 'Finance',   href: '/dashboard/finance' },
+    { icon: <Icons.Dashboard size={16} />, label: 'Dashboard',    href: '/dashboard' },
+    { icon: <Icons.Products size={16} />,  label: 'Products',     href: '/dashboard/products' },
+    { icon: <Icons.Orders size={16} />,    label: 'Orders',       href: '/dashboard/orders' },
+    { icon: <Icons.Store size={16} />,     label: 'Retailers',    href: '/dashboard/retailers' },
+    { icon: <Icons.Orders size={16} />,    label: 'Place Order',  href: '/dashboard/sales/place-order' },
+    { icon: <Icons.Analytics size={16} />, label: 'Leads',        href: '/dashboard/sales/leads' },
+    { icon: <Icons.Reports size={16} />,   label: 'Targets',      href: '/dashboard/sales/targets' },
+    { icon: <Icons.Finance size={16} />,   label: 'Schemes',      href: '/dashboard/sales/schemes' },
+    { icon: <Icons.Analytics size={16} />, label: 'Credit Scores',href: '/dashboard/sales/credit' },
   ],
 };
 
@@ -69,7 +86,7 @@ const ROLE_LABELS: Record<string, string> = {
   warehouse_manager: 'WH Manager', sales_executive: 'Sales Exec',
 };
 
-export default function Sidebar() {
+export default function Sidebar({ onClose }: { onClose?: () => void }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, primaryRole, logout } = useAuthStore();
@@ -89,8 +106,8 @@ export default function Sidebar() {
           <Icons.Package size={18} color="#fff" />
         </div>
         <div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, color: '#1a1d23' }}>FDMS</div>
-          <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>Enterprise</div>
+          <div style={{ fontFamily: 'var(--font-head)', fontSize: 16, fontWeight: 800, color: '#1a1d23' }}>APX Desk</div>
+          <div style={{ fontSize: 10, color: '#9ca3af', letterSpacing: '0.06em', textTransform: 'uppercase', fontWeight: 600 }}>Distribution Platform</div>
         </div>
       </div>
 

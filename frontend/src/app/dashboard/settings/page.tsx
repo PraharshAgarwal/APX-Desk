@@ -47,7 +47,7 @@ export default function SettingsPage() {
 /* ── General Settings ───────────────────────────────── */
 function GeneralSettings({ user }: any) {
   const [form, setForm] = useState({
-    companyName: 'FDMS Enterprise',
+    companyName: 'APX Desk Enterprise',
     address: '123 Agri Hub, Sector 5, Delhi 110001',
     phone: '+91 98765 43210',
     email: 'admin@fdms.com',
@@ -195,7 +195,7 @@ function TaxSettings() {
             </div>
           ))}
           <div style={{ marginTop: 14, padding: '12px', background: '#f8fffe', borderRadius: 8, border: '1px solid #d1fae5', fontSize: 12, color: '#059669', display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <Icons.AlertCircle size={14} color="#059669" style={{ flexShrink: 0, marginTop: 1 }} />
+            <span style={{ flexShrink: 0, marginTop: 1, display: 'inline-flex' }}><Icons.AlertCircle size={14} color="#059669" /></span>
             GST rates are set per product SKU in the Products catalog.
           </div>
         </div>

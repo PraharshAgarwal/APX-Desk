@@ -2,6 +2,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useState, useMemo } from 'react';
 import api from '@/lib/api';
+import { useToast } from '@/hooks/useToast';
 import Modal from '@/components/ui/Modal';
 import { Icons, IconX } from '@/components/ui/Icons';
 
@@ -344,9 +345,18 @@ function StockAdjustModal({ batch, onClose }: { batch: any; onClose: () => void 
   const [reason, setReason] = useState('correction');
   const [delta, setDelta]   = useState<number | ''>('');
   const [notes, setNotes]   = useState('');
+  const toast = useToast();
   const mutation = useMutation({
     mutationFn: async () => (await api.post('/inventory/adjust', { batchId: batch.id, reason, quantityDelta: Number(delta), notes })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['inv'] }); qc.invalidateQueries({ queryKey: ['stock-summary'] }); onClose(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['inv'] });
+      qc.invalidateQueries({ queryKey: ['stock-summary'] });
+      toast.success('Stock adjustment saved');
+      onClose();
+    },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Adjustment failed');
+    },
   });
   const total = Number(batch.quantity || 0), rsv = Number(batch.reserved_qty || 0);
   const preview = delta !== '' ? total + Number(delta) : null;

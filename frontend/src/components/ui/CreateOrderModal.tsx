@@ -5,6 +5,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import Modal from '@/components/ui/Modal';
+import { useToast } from '@/hooks/useToast';
 
 interface OrderItem { productId: string; quantity: number; productName: string; sku: string; unitPrice: number; manufacturer: string; }
 
@@ -22,7 +23,7 @@ export default function CreateOrderModal({ onClose }: { onClose: () => void }) {
 
   const { data: businesses } = useQuery({
     queryKey: ['businesses-list'],
-    queryFn: async () => (await api.get('/finance/balances')).data.data,
+    queryFn: async () => (await api.get('/businesses')).data.data,
     enabled: role !== 'retailer',
   });
 
@@ -39,14 +40,22 @@ export default function CreateOrderModal({ onClose }: { onClose: () => void }) {
   const products: any[] = productsData || [];
   const warehouses: any[] = warehousesData || [];
 
+  const toast = useToast();
+
   const createMutation = useMutation({
     mutationFn: async () => (await api.post('/orders', {
-      businessId,
-      warehouseId,
+      businessId, warehouseId,
       items: items.map(i => ({ productId: i.productId, quantity: i.quantity })),
       notes,
     })).data,
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['orders'] }); onClose(); },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      toast.success('Order placed successfully');
+      onClose();
+    },
+    onError: (err: unknown) => {
+      toast.error((err as { response?: { data?: { message?: string } } })?.response?.data?.message || 'Failed to place order');
+    },
   });
 
   const addItem = () => {
@@ -104,8 +113,8 @@ export default function CreateOrderModal({ onClose }: { onClose: () => void }) {
           <label className="field-label">Business / Retailer</label>
           <select className="form-input" value={businessId} onChange={e => setBusinessId(e.target.value)}>
             <option value="">Select business…</option>
-            {(businesses || []).map((b: any) => (
-              <option key={b.business_id} value={b.business_id}>{b.business_name}</option>
+            {(businesses || []).map((b: any, bi: number) => (
+              <option key={b.id ?? String(bi)} value={b.id}>{b.name} {b.city ? `— ${b.city}` : ''}</option>
             ))}
           </select>
         </div>

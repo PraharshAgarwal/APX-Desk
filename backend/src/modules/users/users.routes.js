@@ -1,15 +1,17 @@
 'use strict';
 
 const express = require('express');
-const { body } = require('express-validator');
+const { body, param, query: qv } = require('express-validator');
 const { validate } = require('../../utils/validators');
 const { success, paginated } = require('../../utils/response');
 const { requireRoles } = require('../../middleware/rbac');
 const { query } = require('../../config/database');
+const { invalidateUserCache } = require('../../middleware/auth');
 const bcrypt = require('bcryptjs');
 const { parsePagination } = require('../../utils/pagination');
 
 const router = express.Router();
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // GET /api/users
 router.get('/', requireRoles('admin', 'sales_executive'), async (req, res, next) => {
@@ -73,16 +75,29 @@ router.post(
 );
 
 // PATCH /api/users/:id
-router.patch('/:id', requireRoles('admin'), async (req, res, next) => {
-  try {
-    const { status, phone, businessId } = req.body;
-    const result = await query(
-      'UPDATE users SET status = COALESCE($1, status), phone = COALESCE($2, phone), business_id = COALESCE($3, business_id), updated_at = NOW() WHERE id = $4 RETURNING id, email, first_name, last_name, status',
-      [status, phone, businessId, req.params.id]
-    );
-    return success(res, result.rows[0], 'User updated');
-  } catch (err) { next(err); }
-});
+router.patch(
+  '/:id',
+  requireRoles('admin'),
+  [
+    param('id').matches(UUID_RE).withMessage('id must be a valid UUID'),
+    body('status').optional().isIn(['active', 'inactive', 'suspended']).withMessage('Invalid status value'),
+    body('phone').optional().trim().isLength({ max: 20 }),
+    body('businessId').optional({ nullable: true }).matches(UUID_RE).withMessage('businessId must be a valid UUID'),
+    validate,
+  ],
+  async (req, res, next) => {
+    try {
+      const { status, phone, businessId } = req.body;
+      const result = await query(
+        'UPDATE users SET status = COALESCE($1, status), phone = COALESCE($2, phone), business_id = COALESCE($3, business_id), updated_at = NOW() WHERE id = $4 RETURNING id, email, first_name, last_name, status',
+        [status, phone, businessId, req.params.id]
+      );
+      // Invalidate cache so a suspension takes effect immediately
+      await invalidateUserCache(req.params.id);
+      return success(res, result.rows[0], 'User updated');
+    } catch (err) { next(err); }
+  }
+);
 
 // GET /api/users/audit-logs
 router.get('/audit-logs', requireRoles('admin'), async (req, res, next) => {

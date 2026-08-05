@@ -63,4 +63,19 @@ async function getManufacturers(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { list, getById, create, update, remove, getPricing, upsertPricing, getManufacturers };
+async function listAllPricing(req, res, next) {
+  try {
+    const rows = await service.listAllPricing({ pricingType: req.query.type });
+    return success(res, rows);
+  } catch (err) { next(err); }
+}
+
+async function deactivatePricing(req, res, next) {
+  try {
+    const row = await service.deactivatePricing(req.params.pricingId);
+    if (!row) return error(res, 'Pricing record not found', 404, 'NOT_FOUND');
+    return success(res, row, 'Pricing removed');
+  } catch (err) { next(err); }
+}
+
+module.exports = { list, getById, create, update, remove, getPricing, upsertPricing, getManufacturers, listAllPricing, deactivatePricing };

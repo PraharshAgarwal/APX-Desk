@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
+import ErrorBoundary from '@/components/ui/ErrorBoundary';
+import OfflineBanner from '@/components/ui/OfflineBanner';
 
 function makeQueryClient() {
   return new QueryClient({
@@ -11,12 +13,18 @@ function makeQueryClient() {
         staleTime: 30 * 1000,
         gcTime: 5 * 60 * 1000,
         retry: (failureCount, error: any) => {
+          // Never retry auth or not-found errors
           if ([401, 403, 404].includes(error?.response?.status)) return false;
-          return failureCount < 2;
+          // Retry network failures and 5xx up to 3 times
+          return failureCount < 3;
         },
-        refetchOnWindowFocus: false,
+        retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30_000), // exponential back-off: 1s, 2s, 4s …
+        refetchOnWindowFocus: true,    // re-fetch stale data when user returns to tab
+        refetchOnReconnect: 'always',  // always re-fetch when coming back online
       },
-      mutations: { retry: false },
+      mutations: {
+        retry: false,
+      },
     },
   });
 }
@@ -38,8 +46,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      {children}
+      <ErrorBoundary>
+        {children}
+      </ErrorBoundary>
+      <OfflineBanner />
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   );
 }
+

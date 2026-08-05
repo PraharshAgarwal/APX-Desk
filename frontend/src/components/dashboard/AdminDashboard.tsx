@@ -5,15 +5,25 @@ import { useQuery } from '@tanstack/react-query';
 import api from '@/lib/api';
 import { useAuthStore } from '@/store/authStore';
 import { Icons, IconCheck } from '@/components/ui/Icons';
+import QueryError from '@/components/ui/QueryError';
 import Link from 'next/link';
+import { SkeletonStatGrid, SkeletonTable } from '@/components/ui/Skeleton';
+import type { Order, InventoryBatch, BusinessBalance, User } from '@/types';
 
 function MiniBar({ pct, color }: { pct: number; color: string }) {
-  const bg: Record<string, string> = { green: '#10b981', amber: '#f59e0b', red: '#ef4444', blue: '#3b82f6' };
   return (
-    <div style={{ height: 7, background: '#f3f4f6', borderRadius: 4, overflow: 'hidden' }}>
-      <div style={{ height: '100%', width: `${Math.min(100, pct)}%`, background: bg[color] || bg.green, borderRadius: 4, transition: 'width 0.5s ease' }} />
+    <div className="credit-bar-track" style={{ marginTop: 6 }}>
+      <div
+        className={`credit-bar-fill ${color}`}
+        style={{ width: `${Math.min(100, pct)}%` }}
+      />
     </div>
   );
+}
+
+function StatusBadge({ status }: { status: string }) {
+  const m: Record<string, string> = { pending: 'badge-amber', confirmed: 'badge-blue', processing: 'badge-blue', dispatched: 'badge-stone', delivered: 'badge-green', cancelled: 'badge-red' };
+  return <span className={`badge ${m[status] || 'badge-stone'}`}>{status}</span>;
 }
 
 export default function AdminDashboard() {
@@ -22,61 +32,75 @@ export default function AdminDashboard() {
   const hour = new Date().getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  const { data: orders } = useQuery({ queryKey: ['orders-recent'], queryFn: async () => (await api.get('/orders?limit=8')).data });
+  const { data: orders, isLoading: loadingOrders, isError: ordersError, refetch: refetchOrders } =
+    useQuery({ queryKey: ['orders-recent'], queryFn: async () => (await api.get('/orders?limit=8')).data });
   const { data: nearExpiry } = useQuery({ queryKey: ['near-expiry'], queryFn: async () => (await api.get('/inventory/near-expiry')).data });
-  const { data: balances } = useQuery({ queryKey: ['all-balances'], queryFn: async () => (await api.get('/finance/balances')).data });
-  const { data: users } = useQuery({ queryKey: ['users'], queryFn: async () => (await api.get('/users')).data });
+  const { data: balances }   = useQuery({ queryKey: ['all-balances'], queryFn: async () => (await api.get('/finance/balances')).data });
+  const { data: users, isLoading: loadingUsers, isError: usersError, refetch: refetchUsers } =
+    useQuery({ queryKey: ['users'], queryFn: async () => (await api.get('/users?limit=20')).data });
 
-  const recentOrders: any[] = orders?.data || [];
-  const expiryBatches: any[] = (nearExpiry?.data || []).slice(0, 4);
-  const businesses: any[] = (balances?.data || []).slice(0, 5);
-  const allUsers: any[] = users?.data || [];
+  const recentOrders: Order[]          = orders?.data || [];
+  const expiryBatches: InventoryBatch[] = (nearExpiry?.data || []).slice(0, 4);
+  const businesses: BusinessBalance[]   = (balances?.data || []).slice(0, 5);
+  const allUsers: User[]               = users?.data || [];
 
-  const totalOrders = orders?.meta?.total ?? 0;
-  const pendingOrders = recentOrders.filter((o: any) => o.status === 'pending').length;
-  const processingOrders = recentOrders.filter((o: any) => o.status === 'processing').length;
-  const activeUsers = allUsers.filter((u: any) => u.status === 'active').length;
+  const totalOrders      = orders?.meta?.total ?? 0;
+  const pendingOrders    = recentOrders.filter(o => o.status === 'pending').length;
+  const processingOrders = recentOrders.filter(o => o.status === 'processing').length;
+  const totalUsers       = users?.meta?.total ?? allUsers.length;
+  const activeUsers      = allUsers.filter(u => u.status === 'active').length;
+
+  const isLoading = loadingOrders || loadingUsers;
 
   return (
     <div className="animate-in">
       {/* Welcome Banner */}
-      <div style={{ background: 'linear-gradient(135deg, #059669 0%, #047857 100%)', borderRadius: 14, padding: '22px 28px', marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center', color: '#fff' }}>
-        <div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: 20, fontWeight: 700, marginBottom: 4 }}>
-            {greeting}, {user?.firstName}
-          </div>
-          <div style={{ fontSize: 13, opacity: 0.8 }}>System Admin · Full access · All regions</div>
+      <div className="banner banner-green">
+        <div className="banner-left">
+          <div className="banner-title">{greeting}, {user?.firstName}</div>
+          <div className="banner-subtitle">System Admin · Full access · All regions</div>
         </div>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <button type="button" onClick={() => router.push('/dashboard/orders')} style={{ background: 'rgba(255,255,255,0.15)', border: '1px solid rgba(255,255,255,0.25)', color: '#fff', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 600, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
+        <div className="banner-actions">
+          <button type="button" onClick={() => router.push('/dashboard/orders')} className="btn-banner-ghost">
             <Icons.Orders size={14} color="#fff" /> Orders
           </button>
-          <button type="button" onClick={() => router.push('/dashboard/admin')} style={{ background: '#fff', border: 'none', color: '#059669', borderRadius: 8, padding: '8px 16px', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}>
+          <button type="button" onClick={() => router.push('/dashboard/admin')} className="btn-banner-solid btn-banner-solid-green">
             + Add User
           </button>
         </div>
       </div>
 
       {/* Key Metrics */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 16, marginBottom: 24 }}>
-        {[
-          { label: 'Total Orders',        value: totalOrders,        sub: `${pendingOrders} pending`,    Icon: Icons.Orders,    color: 'green' },
-          { label: 'Processing',           value: processingOrders,   sub: 'Awaiting dispatch',           Icon: Icons.Wrench,    color: 'amber' },
-          { label: 'Active Users',         value: activeUsers,        sub: `${allUsers.length} total`,    Icon: Icons.Users,     color: 'blue'  },
-          { label: 'Near-Expiry Batches',  value: expiryBatches.length, sub: 'Requires attention',        Icon: Icons.AlertTriangle, color: expiryBatches.length > 0 ? 'red' : 'green' },
-        ].map((m) => (
-          <div key={m.label} className={`stat-card ${m.color}`}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.06em' }}>{m.label}</span>
-              <span style={{ display: 'inline-flex' }}><m.Icon size={18} /></span>
-            </div>
-            <div style={{ fontFamily: 'var(--font-head)', fontSize: 28, fontWeight: 800, color: '#1a1d23' }}>{m.value}</div>
-            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 4 }}>{m.sub}</div>
-          </div>
-        ))}
-      </div>
+      {isLoading ? (
+        <SkeletonStatGrid count={4} />
+      ) : (
+        <div className="stats-grid-4">
+          {[
+            { label: 'Total Orders',       value: totalOrders,           sub: `${pendingOrders} pending`,   Icon: Icons.Orders,        color: 'green' as const,                                                           href: '/dashboard/orders' },
+            { label: 'Processing',          value: processingOrders,      sub: 'Awaiting dispatch',          Icon: Icons.Wrench,        color: 'amber' as const,                                                           href: '/dashboard/orders?status=processing' },
+            { label: 'Total Users',         value: totalUsers,            sub: `${activeUsers} active`,      Icon: Icons.Users,         color: 'blue'  as const,                                                           href: '/dashboard/admin' },
+            { label: 'Near-Expiry Batches', value: expiryBatches.length,  sub: 'Requires attention',         Icon: Icons.AlertTriangle, color: (expiryBatches.length > 0 ? 'red' : 'green') as 'red' | 'green',           href: '/dashboard/inventory?filter=expiring' },
+          ].map((m) => (
+            <Link
+              key={m.label}
+              href={m.href}
+              className={`stat-card ${m.color}`}
+              style={{ display: 'block', textDecoration: 'none', color: 'inherit', transition: 'transform 0.15s, box-shadow 0.15s' }}
+              onMouseEnter={e => { (e.currentTarget as HTMLAnchorElement).style.transform = 'translateY(-2px)'; (e.currentTarget as HTMLAnchorElement).style.boxShadow = '0 6px 20px rgba(0,0,0,0.10)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLAnchorElement).style.transform = ''; (e.currentTarget as HTMLAnchorElement).style.boxShadow = ''; }}
+            >
+              <div className="stat-header">
+                <span className="stat-label">{m.label}</span>
+                <span style={{ display: 'inline-flex' }}><m.Icon size={18} /></span>
+              </div>
+              <div className="stat-value">{m.value}</div>
+              <div className="stat-sub">{m.sub}</div>
+            </Link>
+          ))}
+        </div>
+      )}
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, marginBottom: 16 }}>
+      <div className="content-grid-main-aside">
         {/* Recent Orders */}
         <div className="card">
           <div className="card-header">
@@ -86,9 +110,13 @@ export default function AdminDashboard() {
           <table className="data-table">
             <thead><tr><th>Order #</th><th>Business</th><th>Amount</th><th>Exec</th><th>Status</th><th>Date</th></tr></thead>
             <tbody>
-              {recentOrders.length === 0
-                ? <tr><td colSpan={6} style={{ textAlign: 'center', padding: 32, color: '#9ca3af' }}>No orders yet</td></tr>
-                : recentOrders.slice(0, 6).map((o: any) => (
+              {ordersError && (
+                <tr><td colSpan={6}><QueryError error={ordersError} onRetry={refetchOrders} compact /></td></tr>
+              )}
+              {loadingOrders && !ordersError && <SkeletonTable rows={5} cols={6} />}
+              {!loadingOrders && !ordersError && recentOrders.length === 0
+                ? <tr><td colSpan={6} className="empty-cell">No orders yet</td></tr>
+                : !loadingOrders && recentOrders.slice(0, 6).map((o) => (
                   <tr key={o.id}>
                     <td><strong style={{ color: '#059669' }}>{o.order_number}</strong></td>
                     <td style={{ fontSize: 13 }}>{o.business_name}</td>
@@ -103,23 +131,27 @@ export default function AdminDashboard() {
         </div>
 
         {/* Alerts Panel */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div className="flex-col-gap">
           {/* Expiry Alerts */}
           <div className="card" style={{ border: expiryBatches.length > 0 ? '1px solid #fecaca' : '1px solid #e5e7eb' }}>
             <div className="card-header" style={{ borderBottom: '1px solid #f3f4f6' }}>
-              <span className="card-title" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><Icons.AlertCircle size={14} color="#dc2626" /> Expiry Alerts</span>
+              <span className="card-title card-title-row" style={{ fontSize: 13 }}>
+                <Icons.AlertCircle size={14} color="#dc2626" /> Expiry Alerts
+              </span>
               <Link href="/dashboard/inventory" style={{ fontSize: 11, color: '#dc2626', fontWeight: 600 }}>View all</Link>
             </div>
-            <div style={{ padding: '10px 12px' }}>
+            <div className="card-section-sm">
               {expiryBatches.length === 0
-                ? <div style={{ fontSize: 13, color: '#9ca3af', padding: '8px 0', display: 'inline-flex', alignItems: 'center', gap: 5 }}>No near-expiry batches <IconCheck size={13} /></div>
-                : expiryBatches.map((b: any) => (
-                  <div key={b.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid #f9fafb', alignItems: 'center' }}>
+                ? <div className="text-center-muted" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+                    No near-expiry batches <IconCheck size={13} />
+                  </div>
+                : expiryBatches.map((b) => (
+                  <div key={b.id} className="activity-item">
                     <div>
-                      <div style={{ fontSize: 13, fontWeight: 500 }}>{b.product_name}</div>
-                      <div style={{ fontSize: 11, color: '#6b7280' }}>{b.batch_number} · {Number(b.quantity).toFixed(0)} bags</div>
+                      <div className="activity-title">{b.product_name}</div>
+                      <div className="activity-sub">{b.batch_number} · {Number(b.quantity).toFixed(0)} bags</div>
                     </div>
-                    <span className={`badge ${b.days_until_expiry <= 7 ? 'badge-red' : 'badge-amber'}`}>{b.days_until_expiry}d</span>
+                    <span className={`badge ${(b.days_until_expiry ?? 0) <= 7 ? 'badge-red' : 'badge-amber'}`}>{b.days_until_expiry}d</span>
                   </div>
                 ))}
             </div>
@@ -128,13 +160,15 @@ export default function AdminDashboard() {
           {/* Business Credit Overview */}
           <div className="card">
             <div className="card-header" style={{ borderBottom: '1px solid #f3f4f6' }}>
-              <span className="card-title" style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}><Icons.CreditCard size={14} color="#059669" /> Credit Utilization</span>
+              <span className="card-title card-title-row" style={{ fontSize: 13 }}>
+                <Icons.CreditCard size={14} color="#059669" /> Credit Utilization
+              </span>
               <Link href="/dashboard/finance" style={{ fontSize: 11, color: '#059669', fontWeight: 600 }}>Details</Link>
             </div>
-            <div style={{ padding: '10px 12px' }}>
-              {businesses.map((b: any) => {
-                const used = Number(b.credit_limit) > 0 ? Math.min(100, (Math.abs(Number(b.current_balance)) / Number(b.credit_limit)) * 100) : 0;
-                const color = used > 85 ? 'red' : used > 60 ? 'amber' : 'green';
+            <div className="card-section-sm">
+              {businesses.map((b) => {
+                const used  = Number(b.credit_limit) > 0 ? Math.min(100, (Math.abs(Number(b.current_balance)) / Number(b.credit_limit)) * 100) : 0;
+                const color = used > 85 ? 'alert' : used > 60 ? 'warn' : 'ok';
                 return (
                   <div key={b.business_id} style={{ marginBottom: 12 }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
@@ -151,9 +185,4 @@ export default function AdminDashboard() {
       </div>
     </div>
   );
-}
-
-function StatusBadge({ status }: { status: string }) {
-  const m: Record<string, string> = { pending: 'badge-amber', confirmed: 'badge-blue', processing: 'badge-blue', dispatched: 'badge-stone', delivered: 'badge-green', cancelled: 'badge-red' };
-  return <span className={`badge ${m[status] || 'badge-stone'}`}>{status}</span>;
 }

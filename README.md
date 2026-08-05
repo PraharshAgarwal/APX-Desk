@@ -1,6 +1,6 @@
 # APX Desk
 
-> **B2B Distribution Management Platform** — end-to-end operations for fertilizer distributors. Manage retailer orders, warehouse receipts, inventory batches, dispatch workflows, and financial ledgers from a single dashboard.
+> **B2B Distribution Management Platform**, end-to-end operations for fertilizer distributors. Manage retailer orders, warehouse receipts, inventory batches, dispatch workflows, and financial ledgers from a single dashboard.
 
 ---
 
